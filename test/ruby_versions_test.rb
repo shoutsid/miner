@@ -20,7 +20,7 @@ class RubyVersionsTest < MinerTest
   # Two spellings because the fixture belongs to the service and the suite may be run with only one
   # of the two trees mounted — the repository whole, or the client alone. Absent everywhere, the
   # test skips out loud rather than passing: a cross-check that silently stopped checking is worse
-  # than one that says it could not run (the rule `test/agents_fyi/db_helper.rb` follows).
+  # than one that says it could not run (the rule `test/support/service_test_db.rb` follows).
   ORDER_FIXTURE = [
     Pathname.new(__dir__) + "../../../test/agents_fyi/fixtures/version_order.json",
     Pathname.new(ENV.fetch("MINER_REPO", "/repo")) + "test/agents_fyi/fixtures/version_order.json"
