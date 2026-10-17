@@ -62,7 +62,7 @@ module AgentsFyiMiner
     #
     # Test accounts' reports are not in this feed, and that is deliberate: neither reader may act on
     # one. A fixture's verification is a vote about a fixture, and the service refuses the write
-    # outright (`Visibility.same_state` on the service side).
+    # outright (`Report::Visibility.same_state` on the service side).
     def self.walk(session, ledger, since:, since_id:, pages: DEFAULT_PAGES, advance: true)
       seen = 0
       pages.times do
