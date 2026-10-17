@@ -547,4 +547,72 @@ class PlannerTest < MinerTest
 
     assert_equal({ "the index could not be read" => 1 }, chosen.kinds)
   end
+
+  # A reviewed advisory is a lead, and the planner's two jobs with one are both here: it adds the
+  # package to the candidates even when nothing else named it, and it targets the crossing the fix
+  # landed in — a patch crossing the line ladder never produces.
+  def test_a_lead_adds_its_package_and_targets_the_crossing_its_fix_landed_in
+    history = { "rack" => %w[2.2.5 2.2.6 2.2.6.1 2.2.7] }
+    chosen = P.plan(
+      reports: [], watchlist: [], ledger: L.new, now: 0.0,
+      history_for: ->(package, refresh: true) { history.fetch(package) },
+      leads: { "rack" => [lead("GHSA-aaaa-bbbb-cccc", "high", "2.2.6.1")] },
+      advisory_of: AgentsFyiMiner::Ecosystems::RUBY.method(:advisory_pair)
+    )
+
+    assert_equal [["2.2.6", "2.2.6.1"]],
+      chosen.pairs.map { |pair| [pair.from_version, pair.to_version] }
+  end
+
+  # A lead reaches past the window bound — that is the point of it — but only to its own pair, never
+  # by widening the walk: a package with thirteen line crossings still gets twelve plus the
+  # advisory's one, and a lead whose fix is beyond the bound does not pull the rest of the history
+  # in with it.
+  def test_a_lead_reaches_past_the_window_for_its_own_pair_only
+    history = { "big" => (1..20).map { |n| "1.#{n}.0" } }
+    chosen = P.plan(
+      reports: [], watchlist: [], ledger: L.new, now: 0.0, per_package: 100, budget: 100,
+      history_for: ->(package, refresh: true) { history.fetch(package) },
+      leads: { "big" => [lead("GHSA-aaaa-bbbb-cccc", "high", "1.2.0")] },
+      advisory_of: AgentsFyiMiner::Ecosystems::RUBY.method(:advisory_pair)
+    )
+
+    pairs = chosen.pairs.map { |pair| [pair.from_version, pair.to_version] }
+    assert_includes pairs, ["1.1.0", "1.2.0"]
+    # The window is the newest twelve lines plus the one the lead named.
+    assert_equal 13, pairs.length
+  end
+
+  # One crossing is one piece of work however it was named: a lead whose fix is a line crossing the
+  # ladder already produced adds nothing twice.
+  def test_an_advisory_pair_the_ladder_already_produced_is_not_planned_twice
+    history = { "rack" => %w[1.9.9 2.0.0] }
+    chosen = P.plan(
+      reports: [], watchlist: [], ledger: L.new, now: 0.0,
+      history_for: ->(package, refresh: true) { history.fetch(package) },
+      leads: { "rack" => [lead("GHSA-aaaa-bbbb-cccc", "high", "2.0.0")] },
+      advisory_of: AgentsFyiMiner::Ecosystems::RUBY.method(:advisory_pair)
+    )
+
+    assert_equal [["1.9.9", "2.0.0"]],
+      chosen.pairs.map { |pair| [pair.from_version, pair.to_version] }
+  end
+
+  # Corpus evidence still decides the order: a lead sits above the breadth list and below a report,
+  # so a package somebody filed an unanswered report about is worked before one only GitHub named.
+  def test_demand_is_worked_before_a_lead
+    history = { "sqlalchemy" => %w[1.4.54 2.0.0 2.0.54], "rack" => %w[2.2.5 2.2.6 2.2.6.1] }
+    chosen = P.plan(
+      reports: [report], watchlist: [], ledger: L.new, now: 0.0, per_package: 1, budget: 1,
+      history_for: ->(package, refresh: true) { history.fetch(package) },
+      leads: { "rack" => [lead("GHSA-aaaa-bbbb-cccc", "critical", "2.2.6.1")] },
+      advisory_of: AgentsFyiMiner::Ecosystems::RUBY.method(:advisory_pair)
+    )
+
+    assert_equal ["sqlalchemy"], chosen.pairs.map(&:package)
+  end
+
+  def lead(id, severity, fixed_in)
+    { "id" => id, "severity" => severity, "fixed_in" => fixed_in }
+  end
 end

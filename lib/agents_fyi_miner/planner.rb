@@ -173,12 +173,12 @@ module AgentsFyiMiner
       def plan(reports:, watchlist:, ledger:, history_for:, now:, budget: DEFAULT_BUDGET,
                report_budget: 1, per_package: 1, barren_limit: BARREN_LIMIT,
                max_fetches: DEFAULT_FETCHES, max_crossings: MAX_CROSSINGS,
-               cache_has: NEVER_CACHED, crossings_of: nil)
+               cache_has: NEVER_CACHED, crossings_of: nil, leads: {}, advisory_of: nil)
         ladder = crossings_of || Versions.method(:crossings)
         demand = demanded(reports)
         chosen_reports = reports_to_answer(reports, ledger, now: now, budget: report_budget)
         order = package_order(demand: demand, watchlist: watchlist, ledger: ledger,
-          barren_limit: barren_limit)
+          barren_limit: barren_limit, leads: leads)
 
         due = {}
         withheld = {}
@@ -243,6 +243,11 @@ module AgentsFyiMiner
           found = crossings.select do |pair|
             ledger.due?(package, pair.from_version, pair.to_version, now: now)
           end
+          # The advisory pairs, added here rather than through the ladder because they reach past
+          # `max_crossings` — see `advisory_due` — and deduplicated because a fix's crossing can be
+          # one the line ladder produced too.
+          found.concat(advisory_due(package, history, leads, advisory_of, ledger, now: now))
+          found.uniq! { |pair| [pair.from_version, pair.to_version] }
           if found.any?
             due[package] = found
             next
@@ -352,9 +357,16 @@ module AgentsFyiMiner
       # hold it. How far into this list a cycle walks is `plan`'s decision, because only `plan`
       # knows what a package cost to look at and whether it found anything.
       #
-      def package_order(demand:, watchlist:, ledger:, barren_limit:)
-        candidates = (demand + watchlist).uniq
+      def package_order(demand:, watchlist:, ledger:, barren_limit:, leads: {})
+        # A reviewed advisory adds its package to the candidates, which is the point of a lead: a gem
+        # the service's queue has not ranked yet — because no report names it and the breadth seed
+        # never reached it — is still worth examining when GitHub reviewed a vulnerability in it.
+        candidates = (demand + leads.keys + watchlist).uniq
         demand_set = demand.to_set
+        # The leads are a tier of their own: above the breadth order, below demand. A package can be
+        # both — a report about it and an advisory naming it — and the stronger signal takes the
+        # place, because the two are statements about different things.
+        lead_set = leads.keys.to_set
         live = watchlist.reject { |package| demand_set.include?(package) }
         # The position of each package in the breadth order, built once. `live.index` was the
         # same answer at the cost of a scan per candidate, and a duplicate keeps its FIRST
@@ -364,9 +376,10 @@ module AgentsFyiMiner
 
         tier = lambda do |package|
           next 0 if demand_set.include?(package)
+          next 1 if lead_set.include?(package)
 
           totals = ledger.package_totals(package)
-          totals.settled >= barren_limit && totals.yielded.zero? ? 2 : 1
+          totals.settled >= barren_limit && totals.yielded.zero? ? 3 : 2
         end
 
         # The index is part of the key and not decoration: Python's `sorted` is stable and
@@ -403,6 +416,36 @@ module AgentsFyiMiner
       # second thing to keep true.
       def crossings_available(package, history, max_crossings, ladder:)
         ladder.call(package, history, limit: max_crossings).length
+      end
+
+      # The pairs a package's reviewed advisories name, filtered by whether they are due.
+      #
+      # **A lead reaches past `max_crossings`, deliberately.** The bound exists because a break
+      # nobody upgrades through is worth less than the last release cycle's, and an advisory names a
+      # fix somebody on that older release still needs — the one crossing it is worth reaching for.
+      # It is bounded to the advisory's own pair and never widens the walk's window, so the general
+      # rule is unchanged: twelve newest crossings, plus one per advisory that names an older fix.
+      #
+      # The fetch budget is not consulted: a package already in the order is one the walk has
+      # decided to look at, and its history is fetched once whatever it is used for.
+      #
+      # Broad rescue on purpose: resolving a pair reads a release history, and a lead whose fix
+      # cannot be placed is not work this cycle rather than a reason to end the walk — the posture
+      # `plan` takes for a history the index could not answer.
+      def advisory_due(package, history, leads, advisory_of, ledger, now:)
+        return [] if advisory_of.nil?
+
+        Array(leads[package]).filter_map do |lead|
+          fixed_in = lead["fixed_in"].to_s
+          next if fixed_in.empty?
+
+          pair = advisory_of.call(package, history, fixed_in: fixed_in)
+          next if pair.nil? || !ledger.due?(package, pair.from_version, pair.to_version, now: now)
+
+          pair
+        end
+      rescue StandardError
+        []
       end
 
       # Open reports worth a differential run, most valuable first.

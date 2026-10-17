@@ -50,6 +50,7 @@ module AgentsFyiMiner
   #   name, machine, install_timeout
   #   history(package, home:, refresh:), history_is_cached(package, home:)
   #   crossings(package, history, limit:), pairs_for(package, history, span:)
+  #   advisory_pair(package, history, fixed_in:)
   #   release_date(package, version, home:)
   #   deadline(package, version, home:, rate:, workers:, attempts:)
   #   build(package, version, home:, deadline:, attempt:)
@@ -94,6 +95,11 @@ module AgentsFyiMiner
       def pairs_for(package, history, span:)
         Versions.pairs_for(package, history, span: span)
       end
+
+      # No advisory pairs here, and stated rather than omitted because the loop asks every ecosystem
+      # the same question: this build ingests the GitHub reviewed advisories for RubyGems only, so
+      # there is no PyPI lead for the planner to act on.
+      def advisory_pair(_package, _history, fixed_in:) = nil
 
       def release_date(package, version, home:)
         Versions.release_date(package, version, cache: Pathname.new(home) + "index")
@@ -180,6 +186,15 @@ module AgentsFyiMiner
 
       def pairs_for(package, history, span:)
         RubyVersions.pairs_for(package, history, span: span).map { |pair| pair.with_ecosystem(name) }
+      end
+
+      # The crossing a reviewed advisory's fix landed in, stamped with the index it came from.
+      #
+      # `fixed_in` is GitHub's own statement of where the fix arrived, and it is not re-derived
+      # here — this resolves which releases the crossing is *between*, which is a question about the
+      # index's history rather than about the advisory.
+      def advisory_pair(package, history, fixed_in:)
+        RubyVersions.advisory_pair(package, history, fixed_in: fixed_in)&.with_ecosystem(name)
       end
 
       def release_date(package, version, home:)

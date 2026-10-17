@@ -5,6 +5,7 @@ require "pathname"
 require "set"
 require "thread"
 
+require_relative "advisories"
 require_relative "bandwidth"
 require_relative "corpus"
 require_relative "ecosystems"
@@ -104,6 +105,12 @@ module AgentsFyiMiner
     # pushing facts only where the planner read a history, and the reason it is bounded at all is
     # that a pass over every cached gem must not put the mining it runs beside behind it.
     REQUIREMENTS_SETTLE_PER_CYCLE = 100
+
+    # How long between reads of the reviewed advisory set. Six hours: the source changes as
+    # advisories are published and withdrawn, and a lead is the smallest thing this miner works on,
+    # so there is nothing to gain from reading it more often — the fetch is cached on the volume,
+    # which means calling this every cycle costs a `stat` and not a request.
+    ADVISORIES_REFRESH_SECONDS = 6 * 3600
 
     # Said when the miner stops itself because its allowance is spent.
     BUDGET_SPENT = "write budget spent; leaving the rest for the next cycle"
@@ -271,6 +278,11 @@ module AgentsFyiMiner
       # Resolved on the first cycle rather than in the constructor, so a corpus that is briefly
       # unreachable does not stop the service from starting.
       @operator_id = nil
+      # The reviewed advisories this process last read, grouped by gem, and when it read them.
+      # In memory rather than in the ledger: a lead changes nothing that survives a restart, and
+      # the picture itself is cached on the volume, so a fresh process re-reads it from there.
+      @advisory_leads = {}
+      @advisories_at = nil
       # Whether the corpus's existing backlog still has to be read. In memory rather than in the
       # ledger: it is a fact about this process, and one stored anywhere else would be a flag that
       # could get stuck on.
@@ -380,6 +392,9 @@ module AgentsFyiMiner
       if settled.positive?
         stats.notes << "recorded Ruby requirements for #{settled} cached gem(s)"
       end
+      # On a slow clock, and before the plan: a reviewed advisory is one of the three inputs the
+      # order is built from, so reading it after the plan would be a cycle behind.
+      refresh_advisories(stats)
       # One plan per index, because a plan is an order over one index's watchlist: merging
       # them would have to compare a package's score with a gem's, and the two queues were
       # built by the service's own ranking per index. The reports are answered once — they
@@ -407,6 +422,10 @@ module AgentsFyiMiner
           history_for: ->(package, refresh:) { history(package, ecosystem: ecosystem, refresh: refresh) },
           cache_has: ->(package) { history_is_cached(package, ecosystem: ecosystem) },
           crossings_of: ecosystem.method(:crossings),
+          # The leads are read here rather than fetched inside the planner: the planner is pure and
+          # must stay testable without a network or a cache, so the caller hands it what it read.
+          leads: leads_for(ecosystem),
+          advisory_of: ecosystem.method(:advisory_pair),
           now: Time.now.to_f,
           budget: allowance,
           report_budget: @report_budget
@@ -599,6 +618,61 @@ module AgentsFyiMiner
 
     # The packages this index works, in order.
     def watchlist_for(ecosystem) = (@watchlists[index(ecosystem).name] || []).to_a
+
+    # The reviewed advisories this index's leads came from, grouped by gem.
+    def leads_for(ecosystem) = @advisory_leads[index(ecosystem).name] || {}
+
+    # Read the reviewed advisories and hand the service the picture, on a slow clock.
+    #
+    # Best-effort in every direction, and deliberately, for the reason `report_unexaminable` gives: a
+    # lead only orders the queue's middle tier and names one crossing, so a start that cannot reach
+    # GitHub or cannot reach the service with the picture is a start with a slightly less informed
+    # queue rather than a start that failed. The leads a *cycle* uses come from the cached picture,
+    # which is read here whether or not the post succeeds.
+    #
+    # Only RubyGems, because the reviewed RubyGems set is what the service ingests and a lead is keyed
+    # by a gem's name.
+    def refresh_advisories(stats, now: Time.now.to_f)
+      return unless @advisories_at.nil? || (now - @advisories_at) >= ADVISORIES_REFRESH_SECONDS
+
+      @advisories_at = now
+      @ecosystems.each do |ecosystem|
+        next unless ecosystem.name == "ruby"
+
+        leads = read_advisories(stats)
+        next if leads.nil?
+
+        @advisory_leads[ecosystem.name] = Advisories.leads_by_library(leads)
+        contribute_advisories(ecosystem, leads, stats)
+      end
+    end
+
+    # The picture, from the cache unless the cache is stale. A source that cannot be read and a cache
+    # that does not exist are both "no leads this time": the planner simply runs with none, which is
+    # exactly what it did before advisories existed.
+    def read_advisories(stats)
+      leads = Advisories.picture(cache: @home + "index")
+      stats.notes << "advisories: read #{leads.length} reviewed lead(s)"
+      leads
+    rescue *Advisories::UNREADABLE => e
+      stats.notes << "advisories: could not be read: #{e.message}"
+      nil
+    end
+
+    # **A quota refusal is caught here rather than re-raised, and that is not the swallow the miner's
+    # trap lists.** The trap is about a filing path, where a swallowed `RateLimited` marks a pair
+    # examined and loses the finding; here nothing is lost — the picture is cached, the next cycle
+    # sends the same one, and the quota is surfaced by the next filing through the handler that knows
+    # how long to wait. Re-raising would discard a cycle's reading for a request that is re-sent for
+    # free, which is the same reasoning `report_unexaminable` is written on.
+    def contribute_advisories(ecosystem, leads, stats)
+      @session.contribute_advisories(leads, ecosystem: ecosystem.name)
+      stats.notes << "advisories: contributed #{leads.length} lead(s) for #{ecosystem.name}"
+    rescue Errors::CollectionPaused => e
+      @log.info("not contributing the %s advisory picture: %s", ecosystem.name, e.message)
+    rescue Errors::CorpusError => e
+      @log.warning("could not contribute the %s advisory picture: %s", ecosystem.name, e.message)
+    end
 
     # Tell the service what this index's machine cannot build, from the ledger that established it.
     #

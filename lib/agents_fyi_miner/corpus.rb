@@ -7,9 +7,9 @@ require "pathname"
 require "timeout"
 require "uri"
 
+require_relative "advisories"
 require_relative "errors"
 require_relative "reporting"
-
 module AgentsFyiMiner
   # Talking to the corpus: what this miner files, and what it declines to file.
   #
@@ -220,6 +220,24 @@ module AgentsFyiMiner
                 "records" => records.map do |record|
                   { "package" => record.fetch(:package), "release" => record.fetch(:release),
                     "reason" => record.fetch(:reason) }
+                end })
+    end
+
+    # Hand the service the reviewed advisories for an index, as the picture this machine holds now.
+    #
+    # A picture rather than a delta, the same contract `report_unexaminable` keeps: the write
+    # replaces what was recorded, so an advisory GitHub withdraws drops out by being absent.
+    #
+    # **The rows are documented claims, not evidence, and this method computes nothing.** It
+    # forwards what GitHub reviewed — the service decides what the picture means, which tier it
+    # fills and when it was read — and it never becomes a report. Nil fields are dropped rather than
+    # sent, because an absent value and a null one read the same to the service and the smaller
+    # body is the one that fits.
+    def contribute_advisories(records, ecosystem: "ruby")
+      request("POST", "/mining/advisories",
+        body: { "ecosystem" => ecosystem, "source" => Advisories::SOURCE,
+                "records" => records.map do |record|
+                  record.transform_keys(&:to_s).reject { |_key, value| value.nil? }
                 end })
     end
 

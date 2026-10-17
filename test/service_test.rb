@@ -5,6 +5,7 @@ require "json"
 require "set"
 
 require_relative "test_helper"
+require_relative "stub_helper"
 
 # The service loop, driven with fakes: what it does per cycle, and what it survives.
 #
@@ -24,6 +25,8 @@ class ServiceTest < MinerTest
   Finding = AgentsFyiMiner::Finding
   Mechanism = AgentsFyiMiner::Mechanism
   Pair = AgentsFyiMiner::Pair
+
+  include StubHelper
 
   HISTORY = {
     "sqlalchemy" => %w[1.4.0 1.4.54 2.0.0 2.0.54],
@@ -173,6 +176,15 @@ class ServiceTest < MinerTest
       # never retire.
       @calls << ["unexaminable", ecosystem, machine, records]
       raise Errors::CorpusError, "refused" if @raise_on.include?("unexaminable")
+
+      { "recorded" => records.length }
+    end
+
+    def contribute_advisories(records, ecosystem: "ruby")
+      # The whole picture, recorded so a test can see the leads that travelled rather than only that
+      # a request was made.
+      @calls << ["advisories", ecosystem, records]
+      raise Errors::CorpusError, "refused" if @raise_on.include?("advisories")
 
       { "recorded" => records.length }
     end
@@ -1044,5 +1056,71 @@ class ServiceTest < MinerTest
     # schedule path will push it if its document is ever readable.
     assert_equal 0, miner.settle_cached_requirements(Service::REQUIREMENTS_SETTLE_PER_CYCLE)
     assert_equal Set["aaa-unreadable-gem", "real-gem"], miner.requirements_attempted
+  end
+
+  # --- the reviewed advisories --------------------------------------------------------------
+
+  # A lead read from the volume and handed to the service, and the same read drives the planner, so a
+  # cycle is never a cycle behind the picture it posted. The slow clock is asserted too: a second call
+  # inside the window posts nothing.
+  def test_the_reviewed_advisories_are_read_from_the_volume_and_contributed_on_a_slow_clock
+    lead = { "library" => "rack", "advisory_id" => "GHSA-aaaa-bbbb-cccc", "severity" => "high",
+             "fixed_in" => "2.2.6.1", "source_url" => "https://example.test/a" }
+    write("index/advisories-ruby.json", [lead])
+    session = FakeSession.new(one_page)
+    miner = ruby_miner(session)
+    stats = Service::Stats.new
+
+    miner.refresh_advisories(stats, now: 100.0)
+
+    sent = session.calls.select { |call| call.first == "advisories" }
+    assert_equal 1, sent.length
+    assert_equal "ruby", sent.first[1]
+    assert_equal "rack", sent.first[2].first.fetch("library")
+    assert_equal ["rack"], miner.leads_for(AgentsFyiMiner::Ecosystems::RUBY).keys
+
+    miner.refresh_advisories(stats, now: 200.0)
+    assert_equal 1, session.calls.count { |call| call.first == "advisories" }
+  end
+
+  # A source that cannot be read with no cache is not a failed cycle: the planner runs with no leads,
+  # which is exactly what it did before advisories existed.
+  def test_an_unreadable_advisory_source_leaves_the_cycle_to_run_without_leads
+    session = FakeSession.new(one_page)
+    miner = ruby_miner(session)
+
+    with_stub(AgentsFyiMiner::Advisories, :fetch_page, ->(_url) { raise SocketError, "no route" }) do
+      stats = Service::Stats.new
+      miner.refresh_advisories(stats, now: 1.0)
+
+      assert_empty miner.leads_for(AgentsFyiMiner::Ecosystems::RUBY)
+      assert_equal 0, session.calls.count { |call| call.first == "advisories" }
+    end
+  end
+
+  # A paused index refuses the picture, and that is info rather than a fault: the leads are still
+  # loaded from the cache, so the planner works them while the pause lasts.
+  def test_a_paused_index_refuses_the_picture_without_losing_the_leads
+    write("index/advisories-ruby.json",
+      [{ "library" => "rack", "advisory_id" => "GHSA-aaaa-bbbb-cccc", "severity" => "high",
+         "fixed_in" => "2.2.6.1", "source_url" => "https://example.test/a" }])
+    session = FakeSession.new(one_page)
+    session.define_singleton_method(:contribute_advisories) do |_records, ecosystem: "ruby"|
+      @calls << ["advisories", ecosystem]
+      raise Errors::CollectionPaused.new("rack is paused", ecosystem: ecosystem)
+    end
+    miner = ruby_miner(session)
+
+    miner.refresh_advisories(Service::Stats.new, now: 1.0)
+
+    assert_equal ["rack"], miner.leads_for(AgentsFyiMiner::Ecosystems::RUBY).keys
+  end
+
+  private
+
+  # A service mining RubyGems, which is the one index the reviewed advisories are read for.
+  def ruby_miner(session)
+    Service.new(session: session, home: @home, state: @home + "ledger.json",
+      watchlist: [], ledger: Ledger.new, ecosystems: [AgentsFyiMiner::Ecosystems::RUBY])
   end
 end

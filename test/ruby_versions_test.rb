@@ -215,6 +215,30 @@ class RubyVersionsTest < MinerTest
       versions.release_dates("rake", cache: @home))
   end
 
+  # The crossing a reviewed fix landed in: *adjacent*, not a line crossing, because a security fix
+  # is usually a patch release inside the line a caller is already on (`2.2.6 -> 2.2.6.1`) and the
+  # line ladder never produces that pair.
+  def test_an_advisory_pair_is_the_crossing_the_fix_landed_in
+    pair = versions.advisory_pair("rack", %w[2.2.5 2.2.6 2.2.6.1 2.2.7], fixed_in: "2.2.6.1")
+
+    assert_equal ["2.2.6", "2.2.6.1"], [pair.from_version, pair.to_version]
+  end
+
+  # No predecessor is no crossing: the fix at the oldest release has nothing before it to move from.
+  def test_an_advisory_pair_is_nil_when_the_fix_has_no_predecessor
+    assert_nil versions.advisory_pair("rack", %w[2.2.6.1 2.2.7], fixed_in: "2.2.6.1")
+    assert_nil versions.advisory_pair("rack", %w[2.2.6], fixed_in: "")
+  end
+
+  # A fix spelled as a version the index does not list is placed at the first release at or after it,
+  # because that is the release the fix arrived by; nil only when there is none.
+  def test_an_advisory_pair_uses_the_first_release_at_or_after_a_fix_it_cannot_place
+    pair = versions.advisory_pair("rack", %w[2.2.5 2.2.6 2.2.7], fixed_in: "2.2.6.1")
+
+    assert_equal ["2.2.6", "2.2.7"], [pair.from_version, pair.to_version]
+    assert_nil versions.advisory_pair("rack", %w[2.2.5 2.2.6], fixed_in: "3.0.0")
+  end
+
   private
 
   def versions = AgentsFyiMiner::RubyVersions

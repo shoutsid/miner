@@ -294,6 +294,34 @@ module AgentsFyiMiner
       []
     end
 
+    # The crossing a reviewed fix landed in: the release immediately before `fixed_in`, against
+    # `fixed_in` itself.
+    #
+    # **Adjacent, not a line crossing, and that is the whole reason this exists beside `crossings`.**
+    # A security fix is usually a patch release inside the line a caller is already on —
+    # `rack 2.2.6 -> 2.2.6.1` — and `crossings` reduces a history to one release per minor line, so
+    # it would never produce that pair at all: the advisory's own fix would be invisible to the
+    # ladder. This names it directly.
+    #
+    # nil when the fix is not a release the index lists, or is the oldest release — there is then no
+    # crossing to run, and a pair invented from a spelling the index does not have would examine the
+    # wrong releases. When the fix is absent but the set is not, the first release at or after it is
+    # used, because the fix landed between the release before that and that one.
+    def self.advisory_pair(package, history, fixed_in:)
+      return nil if fixed_in.to_s.strip.empty?
+
+      versions = usable(history)
+      return nil if versions.empty?
+
+      index = versions.index { |version| compare(version, fixed_in).zero? }
+      if index.nil?
+        index = versions.index { |version| (compare(version, fixed_in) || 0) >= 0 }
+      end
+      return nil if index.nil? || index.zero?
+
+      Pair.of(package: package, from_version: versions[index - 1], to_version: versions[index])
+    end
+
     # The index, as text. **The one seam that touches the network**, so that a test can place a
     # document where it would otherwise have to reach RubyGems — the same seam the Python suite
     # patched (`urllib.request.urlopen`), the same shape as `Versions.fetch`, and the reason it

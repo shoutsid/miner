@@ -642,6 +642,33 @@ backlog walk alternates oldest and newest, because a reader that only takes from
 the front reaches a report filed today after every old one: 2,933 backlog entries
 at twenty-four a cycle, while the gems sat waiting for the second confirmation.
 
+## Reviewed advisories
+
+The corpus already records what somebody *said* broke, and an advisory is the largest
+collection of that kind of claim there is — GitHub's reviewed RubyGems set is about 1,160
+advisories, weighted toward exactly the gems this corpus works on. It is used as a **lead**
+and never as a finding. The miner reads the set, hands the service the whole picture
+(`POST /mining/advisories`), and the queue puts those packages in a tier of its own: above
+the breadth seed, because a documented vulnerability in a specific release beats a download
+count, and below anything the corpus has observed, because GitHub reviewed it and this
+miner has not run it.
+
+What the miner does with a lead is execute it. An advisory's `fixed_in` names the release the
+fix arrived in, so the planner targets *that* crossing — the release immediately before it
+against the fix — even when it is older than the twelve newest line crossings the schedule
+otherwise walks, and even when it is a patch inside the line a caller is already on
+(`rack 2.2.6 -> 2.2.6.1`), which the line ladder never produces. A finding that comes back is
+this corpus's own differential, filed and verified like any other; a crossing that yields
+nothing files nothing, and the advisory stays exactly what it was — a documented claim. No
+advisory is ever written as a report, routed to the verifiers, or allowed to move a report's
+status, trust or counters.
+
+The source is read from the GitHub REST API rather than the bulk OSV archive, and that is the
+stdlib-only rule rather than a preference: Ruby's standard library carries no zip reader, and
+the API answers the same question in about twelve paged requests, cached on the volume and
+read once every six hours. See [Known limits](../../docs/known-limits.md#the-reviewed-advisories)
+for what the API does not carry.
+
 ## What it does not reach yet
 
 - **Only arguments, not behaviour.** A release that changes what a call *does*
