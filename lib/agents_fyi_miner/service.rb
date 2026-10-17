@@ -112,6 +112,15 @@ module AgentsFyiMiner
     # which means calling this every cycle costs a `stat` and not a request.
     ADVISORIES_REFRESH_SECONDS = 6 * 3600
 
+    # How long a *failed* read waits before it is tried again.
+    #
+    # Not the refresh window: a refusal is the one case where waiting the full six hours is wrong,
+    # because the refusal is usually momentary — the unauthenticated GitHub API allows sixty requests
+    # an hour, and a read is about twelve — and the alternative to retrying is six hours without
+    # leads for a failure that has already passed. Half an hour keeps a persistent outage to a couple
+    # of requests an hour while still recovering from a rate limit within the hour it resets.
+    ADVISORIES_RETRY_SECONDS = 30 * 60
+
     # Said when the miner stops itself because its allowance is spent.
     BUDGET_SPENT = "write budget spent; leaving the rest for the next cycle"
 
@@ -635,16 +644,26 @@ module AgentsFyiMiner
     def refresh_advisories(stats, now: Time.now.to_f)
       return unless @advisories_at.nil? || (now - @advisories_at) >= ADVISORIES_REFRESH_SECONDS
 
-      @advisories_at = now
+      read = false
       @ecosystems.each do |ecosystem|
         next unless ecosystem.name == "ruby"
 
         leads = read_advisories(stats)
         next if leads.nil?
 
+        read = true
         @advisory_leads[ecosystem.name] = Advisories.leads_by_library(leads)
         contribute_advisories(ecosystem, leads, stats)
       end
+      # **A read that failed is not a read that happened.** Advancing the stamp unconditionally would
+      # suppress the next attempt for the whole six-hour window, so one transient refusal — a rate
+      # limit (the unauthenticated API allows sixty requests an hour), a timeout, a source having an
+      # afternoon — would cost six hours of leads for a failure that a minute later would not occur.
+      # That is the same shape `AGENTS.md` records for a retry delay that is written and never read,
+      # and for a transient failure settled for good. A failure backs off for `ADVISORIES_RETRY_SECONDS`
+      # instead, which is long enough that repeated failures during an outage cost a handful of
+      # requests rather than a burst.
+      @advisories_at = read ? now : now - ADVISORIES_REFRESH_SECONDS + ADVISORIES_RETRY_SECONDS
     end
 
     # The picture, from the cache unless the cache is stale. A source that cannot be read and a cache

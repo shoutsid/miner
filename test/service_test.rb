@@ -1116,6 +1116,35 @@ class ServiceTest < MinerTest
     assert_equal ["rack"], miner.leads_for(AgentsFyiMiner::Ecosystems::RUBY).keys
   end
 
+  # **A read that failed is not a read that happened.** A transient refusal must not suppress the
+  # next attempt for the whole six-hour window, or one rate limit — the unauthenticated GitHub API
+  # allows sixty requests an hour and a read is about twelve — costs six hours of leads for a
+  # failure that has already passed. It is the shape `AGENTS.md` records for a retry delay that is
+  # written and never read.
+  def test_a_failed_advisory_read_is_retried_sooner_than_the_refresh_window
+    miner = ruby_miner(FakeSession.new(one_page))
+    fetches = 0
+
+    with_stub(AgentsFyiMiner::Advisories, :fetch_page, lambda { |_url|
+      fetches += 1
+      raise AgentsFyiMiner::Advisories::IndexError.new("rate limited", code: 403)
+    }) do
+      miner.refresh_advisories(Service::Stats.new, now: 1_000.0)
+      first = fetches
+      assert_operator first, :>, 0, "the first read should have been attempted"
+
+      # Inside the retry backoff: no second attempt, so a persistent outage is a few requests an
+      # hour rather than one per cycle.
+      miner.refresh_advisories(Service::Stats.new, now: 1_000.0 + 60)
+      assert_equal first, fetches
+
+      # Past the backoff, and still inside the six-hour window: it tries again.
+      miner.refresh_advisories(Service::Stats.new,
+        now: 1_000.0 + Service::ADVISORIES_RETRY_SECONDS + 1)
+      assert_operator fetches, :>, first
+    end
+  end
+
   private
 
   # A service mining RubyGems, which is the one index the reviewed advisories are read for.
