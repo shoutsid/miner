@@ -16,6 +16,7 @@ require_relative "log"
 require_relative "pair"
 require_relative "planner"
 require_relative "rubyversions"
+require_relative "rubyindex"
 require_relative "solving"
 require_relative "versions"
 
@@ -656,17 +657,33 @@ module AgentsFyiMiner
     def record_requirements(package)
       return true if @requirements_settled.include?(package)
 
-      requirements = RubyVersions.release_requirements(package, cache: @home + "index")
-      if requirements.empty?
+      # **Both fields from one document.** `RubyIndex` reads `/info/<gem>`, which carries each
+      # release's Ruby floor *and* its runtime dependencies — the fact a Rails move turns on
+      # (`devise 2.2.4` declares `railties ~> 3.1`) and the one the versions endpoint does not
+      # have at all. One reading, one source, so a fact about a release cannot be assembled out
+      # of two documents fetched at different times.
+      facts = begin
+        RubyIndex.release_facts(package, cache: @home + "index")
+      rescue RubyIndex::NoDocument => e
+        # Nothing cached and the index would not answer. The gem stays unsettled, for the
+        # reason the empty mapping below states: a document unreadable when this ran is what
+        # a later fetch fixes.
+        @log.warning("could not read what %s declares: %s", package, e)
+        return true
+      end
+      if facts.empty?
         # Not settled, and deliberately: an empty mapping means *nothing was read* —
-        # `RubyVersions.release_requirements` says so in its own docstring — not that the releases
+        # `RubyIndex.release_facts` says so in its own docstring — not that the releases
         # declare nothing. A document that was unreadable when this ran is exactly what a later
         # fetch fixes, and settling it here would leave that fetch with nobody to carry it to the
         # corpus. The schedule path re-reads it; the walk keeps its own note of what it has looked
         # at.
         return true
       end
-      pages = requirements.sort.map { |version, requirement| { "version" => version, "ruby_requirement" => requirement } }
+      pages = facts.sort.map do |version, fact|
+        { "version" => version, "ruby_requirement" => fact["ruby_requirement"],
+          "dependencies" => fact["dependencies"] }
+      end
       pages.each_slice(REQUIREMENTS_PAGE) do |page|
         @session.record_release_facts(package, page)
       rescue Errors::RateLimited, Errors::CollectionPaused

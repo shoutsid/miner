@@ -215,26 +215,6 @@ class RubyVersionsTest < MinerTest
       versions.release_dates("rake", cache: @home))
   end
 
-  def test_a_releases_declared_ruby_requirement_is_read_from_the_cached_document
-    # The requirement arrives in the same document as the versions, so reading it costs no
-    # request. A release that declared none is recorded as nil, not omitted: the service stores
-    # that statement, and omitting it would look like a gap.
-    write("rails#{AgentsFyiMiner::RubyVersions::CACHE_SUFFIX}",
-      "releases" => [
-        { "number" => "7.1.0", "ruby_version" => ">= 2.7.0", "prerelease" => false },
-        { "number" => "8.0.0", "ruby_version" => nil, "prerelease" => false },
-        { "number" => "8.0.1", "ruby_version" => "  ", "prerelease" => false }
-      ])
-
-    assert_equal({ "7.1.0" => ">= 2.7.0", "8.0.0" => nil, "8.0.1" => nil },
-      versions.release_requirements("rails", cache: @home))
-  end
-
-  def test_an_uncached_gem_yields_no_requirements_rather_than_a_claim
-    # Nothing read means nothing to say — never that no release declares anything.
-    assert_equal({}, versions.release_requirements("never-fetched", cache: @home))
-  end
-
   private
 
   def versions = AgentsFyiMiner::RubyVersions

@@ -399,29 +399,6 @@ module AgentsFyiMiner
       end
     end
 
-    # The Ruby requirement each cached release declares, as the index stated it.
-    #
-    # Read from the same document as the versions and dates, so no request is spent on it. A
-    # release the index declared no requirement for maps to nil — that is a statement the
-    # service stores, not an absence it guesses at. An empty mapping means nothing was read,
-    # never that no release declares anything.
-    def self.release_requirements(package, cache:)
-      payload = read_cache(cache + "#{package}#{CACHE_SUFFIX}")
-      return {} if payload.nil?
-
-      releases = payload["releases"]
-      return {} unless releases.is_a?(Array)
-
-      releases.each_with_object({}) do |release, found|
-        next unless release.is_a?(Hash)
-        next unless release["number"].is_a?(String)
-
-        requirement = release["ruby_version"]
-        found[release["number"]] =
-          requirement.is_a?(String) && !requirement.strip.empty? ? requirement : nil
-      end
-    end
-
     # When one release was published, or nil when this deployment did not read it.
     def self.release_date(package, version, cache:)
       release_dates(package, cache: cache)[version]

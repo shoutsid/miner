@@ -285,6 +285,11 @@ class ServiceTest < MinerTest
     Pair.of(package: "pkg#{index}", from_version: "1.0", to_version: "2.0")
   end
 
+  # A gem this deployment has read, as two documents on disk: the versions payload (which is
+  # what the settle pass enumerates — `cached_gems`) and the compact index's document, which
+  # is what the facts are read from now that they carry dependencies. Both, because the
+  # production path fetches the index once and caches it, and a test that left it out would
+  # reach the network.
   def cached_gem(home, package, releases)
     FileUtils.mkdir_p(home + "index")
     (home + "index" + "#{package}#{AgentsFyiMiner::RubyVersions::CACHE_SUFFIX}").write(
@@ -294,6 +299,8 @@ class ServiceTest < MinerTest
         end
       )
     )
+    lines = Array.new(releases) { |index| "1.0.#{index} rack:~> 1.0|checksum:aa,ruby:>= 2.7.0" }
+    (home + "index" + "#{package}#{AgentsFyiMiner::RubyIndex::CACHE_SUFFIX}").write(lines.join("\n"))
   end
 
   # --- the deadline the pricing decides ---------------------------------------------------
