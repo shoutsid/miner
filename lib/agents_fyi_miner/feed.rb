@@ -59,10 +59,6 @@ module AgentsFyiMiner
     # `advance` is false for the reconciliation walk: that one starts at the beginning of a corpus
     # whose end has already been read, and moving the cursor backwards to a page it stopped at would
     # make the next cycle re-read the middle for no reason.
-    #
-    # Test accounts' reports are not in this feed, and that is deliberate: neither reader may act on
-    # one. A fixture's verification is a vote about a fixture, and the service refuses the write
-    # outright (`Report::Visibility.same_state` on the service side).
     def self.walk(session, ledger, since:, since_id:, pages: DEFAULT_PAGES, advance: true)
       seen = 0
       pages.times do

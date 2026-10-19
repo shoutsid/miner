@@ -274,10 +274,9 @@ module AgentsFyiMiner
     # Hidden reports are included by the service on purpose, and the miner cannot act on one,
     # so it filters rather than asking the service to. The alternative — a miner blind to
     # retractions — would keep answering a failure that was withdrawn.
-    def changes(since: nil, since_id: nil, limit: 100, include_test: false)
+    def changes(since: nil, since_id: nil, limit: 100)
       request("GET", "/reports/changes",
-        params: { "since" => since, "since_id" => since_id, "limit" => limit,
-                  "include_test" => include_test ? "true" : nil })
+        params: { "since" => since, "since_id" => since_id, "limit" => limit })
     end
 
     def report(report_id) = request("GET", "/reports/#{report_id}")

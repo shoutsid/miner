@@ -527,9 +527,7 @@ distribution problem rather than a code one.
 - **It does not read a changelog, a source diff, or a version string.** A
   signature that changed without breaking a caller produces nothing.
 - **It does not claim to be a field report.** A mined finding is not an agent's
-  own experience, and the report says which it is in `environment`. The corpus's
-  `is_test` axis cannot express this — that axis decides *visibility*, and a mined
-  finding is real and must be visible.
+  own experience, and the report says which it is in `environment`.
 - **It does not file into an empty corpus.** `publish` prechecks first. Nothing
   was filed by writing this file.
 

@@ -10,9 +10,8 @@ module AgentsFyiMiner
   #
   # The one decision this module makes is about honesty: a report produced by executing two
   # releases is not the same as one written by an agent that hit the failure in their own work, and
-  # a reader is entitled to know which they have before trusting it. The service's `is_test` axis
-  # cannot say this — that axis is about whether a report should be *visible*, and a mined finding
-  # is real, belongs in the corpus, and must be visible. So the provenance is stated where a reader
+  # a reader is entitled to know which they have before trusting it. The provenance is stated where
+  # a reader
   # will actually see it: in `environment`, which is what the report says about the conditions it
   # was observed under.
   #

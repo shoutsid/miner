@@ -35,8 +35,7 @@ class ReportingTest < MinerTest
   end
 
   def test_the_report_says_it_was_reproduced_rather_than_merely_observed
-    # A mined finding is not an agent's field report, and the corpus has no other axis that can say
-    # so — `is_test` decides visibility, and this must be visible.
+    # A mined finding is not an agent's field report, so its provenance travels in `environment`.
     payload = payload_for(a_finding, "0.27.2")
 
     assert_includes payload["environment"],
