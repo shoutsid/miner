@@ -63,7 +63,7 @@ class ReportingTest < MinerTest
   end
 
   def test_the_precheck_draft_is_the_submit_body_less_the_fields_it_refuses
-    # `POST /reports/precheck` takes a narrower model than `POST /reports` and is strict about it:
+    # `POST /api/reports/precheck` takes a narrower model than `POST /api/reports` and is strict about it:
     # sending the whole body is a 422 that reads like the finding being unacceptable rather than the
     # request being too complete.
     draft = REPORTING.precheck_payload_for(payload_for(a_finding, "0.27.2"))

@@ -112,7 +112,7 @@ module AgentsFyiMiner
 
     def precheck(payload)
       # Whether this draft is new, and what it is close to if it is not.
-      request("POST", "/reports/precheck", body: payload)
+      request("POST", "/api/reports/precheck", body: payload)
     end
 
     # One index's queue: what the service thinks is worth mining, best first.
@@ -143,7 +143,7 @@ module AgentsFyiMiner
         wanted = limit - found.length
         break if wanted <= 0
 
-        body = request("GET", "/mining/targets",
+        body = request("GET", "/api/mining/targets",
           params: { "limit" => wanted, "offset" => offset,
                     "ecosystem" => ecosystem })
         if body["paused"]
@@ -199,7 +199,7 @@ module AgentsFyiMiner
     # the moment more than one is mined: a ranking is a ranking *of* an index, and a list of
     # gem names posted as PyPI's would send a Python installer after every one of them.
     def contribute_seed(projects, source:, ecosystem: "python")
-      request("POST", "/mining/seed",
+      request("POST", "/api/mining/seed",
         body: { "projects" => projects, "source" => source, "ecosystem" => ecosystem })
     end
 
@@ -215,7 +215,7 @@ module AgentsFyiMiner
     # the toolchain as well as about the release: a wheel that does not exist for `cp312` exists
     # for `cp313`, and a fact with no stamp is one no later image could retire.
     def report_unexaminable(records, machine:, ecosystem: "python")
-      request("POST", "/mining/unexaminable",
+      request("POST", "/api/mining/unexaminable",
         body: { "ecosystem" => ecosystem, "machine" => machine,
                 "records" => records.map do |record|
                   { "package" => record.fetch(:package), "release" => record.fetch(:release),
@@ -234,7 +234,7 @@ module AgentsFyiMiner
     # sent, because an absent value and a null one read the same to the service and the smaller
     # body is the one that fits.
     def contribute_advisories(records, ecosystem: "ruby")
-      request("POST", "/mining/advisories",
+      request("POST", "/api/mining/advisories",
         body: { "ecosystem" => ecosystem, "source" => Advisories::SOURCE,
                 "records" => records.map do |record|
                   record.transform_keys(&:to_s).reject { |_key, value| value.nil? }
@@ -256,18 +256,18 @@ module AgentsFyiMiner
       # would read as the corpus refusing a fact, which it is not.
       raise ArgumentError, "record_release_facts needs a library and its facts" if library.nil? || facts.nil?
 
-      request("POST", "/releases/facts",
+      request("POST", "/api/releases/facts",
         body: { "ecosystem" => "ruby", "library" => library, "facts" => facts })
     end
 
-    def submit(payload) = request("POST", "/reports", body: payload)
+    def submit(payload) = request("POST", "/api/reports", body: payload)
 
     # Who this key is, so a service can tell its own reports from others'.
     #
     # The miner verifies by executing, and execution by the author is not the independent
     # reproduction the corpus asks for. Knowing its own operator id is what lets it decline
     # to vote on itself rather than write a row the service will refuse to count.
-    def me = request("GET", "/operators/me")
+    def me = request("GET", "/api/operators/me")
 
     # One page of everything created or changed after a cursor.
     #
@@ -275,23 +275,23 @@ module AgentsFyiMiner
     # so it filters rather than asking the service to. The alternative — a miner blind to
     # retractions — would keep answering a failure that was withdrawn.
     def changes(since: nil, since_id: nil, limit: 100)
-      request("GET", "/reports/changes",
+      request("GET", "/api/reports/changes",
         params: { "since" => since, "since_id" => since_id, "limit" => limit })
     end
 
-    def report(report_id) = request("GET", "/reports/#{report_id}")
+    def report(report_id) = request("GET", "/api/reports/#{report_id}")
 
     # Reserve a report while working on it, so nobody derives it twice.
-    def claim(report_id) = request("POST", "/reports/#{report_id}/claim")
+    def claim(report_id) = request("POST", "/api/reports/#{report_id}/claim")
 
-    def release(report_id) = request("POST", "/reports/#{report_id}/release")
+    def release(report_id) = request("POST", "/api/reports/#{report_id}/release")
 
     def propose_resolution(report_id, payload)
-      request("POST", "/reports/#{report_id}/resolution", body: payload)
+      request("POST", "/api/reports/#{report_id}/resolution", body: payload)
     end
 
     def verify(report_id, payload)
-      request("POST", "/reports/#{report_id}/verify", body: payload)
+      request("POST", "/api/reports/#{report_id}/verify", body: payload)
     end
 
     # File one finding, or say why it was not filed.
@@ -384,7 +384,7 @@ module AgentsFyiMiner
     # see that they came from one source.
     def self.register(base_url, name:, email:, http: Http.new)
       response = http.call(
-        method: "POST", url: base_url.sub(%r{/+\z}, "") + "/operators/register",
+        method: "POST", url: base_url.sub(%r{/+\z}, "") + "/api/operators/register",
         body: JSON.generate({ "name" => name, "email" => email }),
         headers: { "Content-Type" => "application/json" }
       )

@@ -51,7 +51,7 @@ class CorpusTest < MinerTest
 
     assert_equal 300.0, error.retry_after
     assert_equal "POST", http.calls.first[:method]
-    assert_equal "http://x/reports", http.calls.first[:url]
+    assert_equal "http://x/api/reports", http.calls.first[:url]
   end
 
   # The whole set, with the stamp that established it. Not a delta: the service's write replaces
@@ -67,7 +67,7 @@ class CorpusTest < MinerTest
 
     call = http.calls.first
     assert_equal "POST", call[:method]
-    assert_equal "http://x/mining/unexaminable", call[:url]
+    assert_equal "http://x/api/mining/unexaminable", call[:url]
     assert_equal({ "ecosystem" => "python", "machine" => "cpython 3.12 cc",
                    "records" => [{ "package" => "wrapt", "release" => "wrapt 1.13.3",
                                    "reason" => "no wheel for this interpreter" }] },
@@ -184,7 +184,7 @@ class CorpusTest < MinerTest
     # A pause is not the corpus declining this request: nothing is settled, and the same
     # request is what should happen later.
     refute error.permanent?
-    assert_includes error.message, "POST /reports -> 503"
+    assert_includes error.message, "POST /api/reports -> 503"
     assert_includes error.message, "Ruby is being brought up first"
   end
 
@@ -216,7 +216,7 @@ class CorpusTest < MinerTest
     http = answer_json({
       "targets" => [], "count" => 0, "ecosystem" => "python", "paused" => true,
       "paused_reason" => "Ruby is being brought up first",
-      "next_step" => "Resume it with `POST /admin/collection/python/resume`."
+      "next_step" => "Resume it with `POST /api/admin/collection/python/resume`."
     })
 
     error = assert_raises(AgentsFyiMiner::Errors::CollectionPaused) do
@@ -226,7 +226,7 @@ class CorpusTest < MinerTest
     assert_equal "python", error.ecosystem
     assert_equal AgentsFyiMiner::Errors::PAUSE_FALLBACK, error.retry_after
     assert_includes error.message, "Ruby is being brought up first"
-    assert_includes error.message, "POST /admin/collection/python/resume"
+    assert_includes error.message, "POST /api/admin/collection/python/resume"
   end
 
   # Registration is rate limited to ten an hour from one address, so the key is written once

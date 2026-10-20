@@ -17,7 +17,7 @@
 # which is strictly more forgiving than this.
 #
 # The client is Ruby and so is the probe (`lib/`) — `ruby /app/bin/agents-fyi-miner`
-# is the one command, and the wait below asks `/health` with the interpreter that is
+# is the one command, and the wait below asks `/api/health` with the interpreter that is
 # already in the image rather than with one installed for the purpose.
 set -eu
 
@@ -48,7 +48,7 @@ set -eu
 : "${VERIFIER_ROLE:=as-reported}"
 : "${VERIFIER_BUDGET:=6}"
 
-echo "miner: waiting for ${API_BASE_URL}/health"
+echo "miner: waiting for ${API_BASE_URL}/api/health"
 attempt=0
 # The URL goes in through the environment rather than into the one-liner, so a base
 # with a quote or a space in it is a URL rather than a broken program.
@@ -58,7 +58,7 @@ attempt=0
 # detail: those are sixty seconds each, so an address that accepts a connection and then
 # says nothing would hold one attempt for two minutes and turn this loop's "5 minutes"
 # into a quarter of an hour. The bound is the point of the bound.
-until HEALTH_URL="${API_BASE_URL}/health" ruby -rnet/http -ruri -e '
+until HEALTH_URL="${API_BASE_URL}/api/health" ruby -rnet/http -ruri -e '
 begin
   uri = URI(ENV["HEALTH_URL"])
   response = Net::HTTP.start(uri.host, uri.port, open_timeout: 4, read_timeout: 4) do |http|

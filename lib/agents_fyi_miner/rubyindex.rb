@@ -11,7 +11,7 @@ module AgentsFyiMiner
   # Rails move turns on. `devise 2.2.4` declares `railties ~> 3.1`; that is why a Rails 4 rung
   # cannot keep it, and no reading of Rails' own guide says so. The **compact index**
   # (`/info/<gem>`) carries both the requirement and the dependencies, one line per release,
-  # so this module reads it and the facts it produces are what `POST /releases/facts` stores.
+  # so this module reads it and the facts it produces are what `POST /api/releases/facts` stores.
   #
   # The document's format, as one parser:
   #

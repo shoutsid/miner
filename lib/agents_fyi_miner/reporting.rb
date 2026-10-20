@@ -148,8 +148,8 @@ module AgentsFyiMiner
         "(#{finding.call_sites} call site(s), #{finding.repaired_call_sites} repaired)"
     end
 
-    # What `POST /reports/precheck` accepts, which is deliberately narrower than what `POST
-    # /reports` accepts: the precheck answers "is this already known", so it takes the fields the
+    # What `POST /api/reports/precheck` accepts, which is deliberately narrower than what `POST
+    # /api/reports` accepts: the precheck answers "is this already known", so it takes the fields the
     # comparison reads and refuses the rest — the models are strict, and sending the whole body to
     # both is what made the kind a field submit took and precheck refused. `environment` and
     # `attempted` do not affect a verdict, so they are dropped here rather than sent and rejected.

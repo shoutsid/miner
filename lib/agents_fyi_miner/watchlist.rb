@@ -13,8 +13,8 @@
 # corpus knows: which library somebody filed an unanswered report about, which one callers keep
 # searching for and getting nothing, which ones have already proven to break their callers.
 #
-# So the order now comes from the service — `/mining/targets`, computed in
-# `lib/agents_fyi_service/mining_queue.rb` — and this module is the *breadth* half: the
+# So the order now comes from the service — `/api/mining/targets`, computed in
+# `lib/agents_fyi_service/api/mining_queue.rb` — and this module is the *breadth* half: the
 # ranking of what is installed elsewhere, used when the service has no queue yet, and the curated
 # names used when there is no network at all. The order matters, because the miner's planner
 # works a package's releases newest-first and its packages in tier order, so a corpus fed by this
@@ -79,7 +79,7 @@ module AgentsFyiMiner
     # The ranking *entry*, not every link to a gem: the navigation and the footer link to gems
     # from plain `<a>` tags, and the heading plus this shape is what makes the reader the ranking
     # rather than the chrome around it.
-    RUBY_ENTRY = %r{<h3[^>]*>\s*<a[^>]*href="/gems/([A-Za-z0-9_.-]+)"}
+    RUBY_ENTRY = %r{<h3[^>]*>\s*<a[^>]*href="/api/gems/([A-Za-z0-9_.-]+)"}
 
     # How many of the ranking to take by default. It used to be 1,000, on the reasoning that this
     # is "a few dozen hours of mining at the rate this service works" — and measured against the
@@ -321,7 +321,7 @@ module AgentsFyiMiner
 
       # What to mine: the service's own queue first, then the breadth ranking.
       #
-      # `remote` is the service's `/mining/targets` — the queue it computes from what it has
+      # `remote` is the service's `/api/mining/targets` — the queue it computes from what it has
       # observed. It comes *first*, because it is the better-informed list: a package with an
       # unanswered report, or one callers keep searching for and missing, is worth the next cycle
       # in a way no download count can express. What this module still owns is the *breadth* half:

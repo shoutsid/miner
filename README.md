@@ -91,7 +91,7 @@ that the releases are old enough that nobody upgrades from them, and exactly tho
 are the ones whose dependencies no longer build on a current interpreter.
 
 **It works the queue the service decided on, and owns only the breadth half.** The
-order comes from `GET /mining/targets` — computed by the service, in
+order comes from `GET /api/mining/targets` — computed by the service, in
 `components/mining/app/services/mining/mining_queue.rb`, from what this corpus has
 observed: a library with an unanswered report, one callers keep
 searching for and getting nothing, one that has already proven to break its
@@ -127,7 +127,7 @@ a 2013-era sdist with no wheel, a dependency tree that no longer resolves. Nothi
 the corpus can observe it: no report is filed and no search is made, so the service
 would go on offering work nobody can do (measured when the watchlist was 1,000
 packages long: **198** were in that state). So every cycle ends by pushing the
-ledger's whole picture to `POST /mining/unexaminable` — every release this machine
+ledger's whole picture to `POST /api/mining/unexaminable` — every release this machine
 could not build, with the installer's reason and the machine stamp that established
 it. The whole picture rather than a delta, because the service *replaces* the index's
 one: a release that installs again after an image bump drops out by being absent, and
@@ -276,7 +276,7 @@ release.
    four decisions. Findings are clustered by mechanism, because a corpus holding
    the same fact eleven times is worse than one holding it once.
 6. **Filing.** The corpus is asked whether the finding is already known — `POST
-   /reports/precheck` — and the answer is respected in the corpus's own words.
+   /api/reports/precheck` — and the answer is respected in the corpus's own words.
    What `submit` would refuse is not filed; neither is a finding whose every
    identifying symptom is already recorded. A finding the corpus merely calls
    *similar* is filed, because that is the corpus saying it would not refuse it —
@@ -290,7 +290,7 @@ release.
    it, `from_version`, `subject` and `change_kind` state the same crossing as data:
    which release the call still worked in, the bare name or argument that changed,
    and which of the five mechanisms it was. That is what lets `GET
-   /reports/upgrade` answer a question asked *before* the failure — a caller moving
+   /api/reports/upgrade` answer a question asked *before* the failure — a caller moving
    a dependency from one release to another is told what the move crosses, and
    whether any of it is about a name they use. All of it was already known here;
    the second form is what made it queryable.
@@ -320,7 +320,7 @@ corpus grown by execution should look like.
 
 What a caller gets back is the evidence, not the number: every verification is
 recorded with the environment it was made in and the words the operator wrote, and
-`GET /reports/{id}` returns them beside the report. For these two that means the
+`GET /api/reports/{id}` returns them beside the report. For these two that means the
 releases that were executed and the interpreter's own exception line.
 
 There is a third possible answer, and it is the one that matters most: **the
@@ -646,7 +646,7 @@ The corpus already records what somebody *said* broke, and an advisory is the la
 collection of that kind of claim there is — GitHub's reviewed RubyGems set is about 1,160
 advisories, weighted toward exactly the gems this corpus works on. It is used as a **lead**
 and never as a finding. The miner reads the set, hands the service the whole picture
-(`POST /mining/advisories`), and the queue puts those packages in a tier of its own: above
+(`POST /api/mining/advisories`), and the queue puts those packages in a tier of its own: above
 the breadth seed, because a documented vulnerability in a specific release beats a download
 count, and below anything the corpus has observed, because GitHub reviewed it and this
 miner has not run it.
@@ -743,7 +743,7 @@ for what the API does not carry.
   and a report whose *call site* differs is given the same fix. The resolution says
   so, in `notes`, where whoever applies it will read it; the guard is a matching
   version line, not a matching stack.
-- **The queue is read once, at startup.** `cli.serve` resolves `/mining/targets`
+- **The queue is read once, at startup.** `cli.serve` resolves `/api/mining/targets`
   once before the worker loop, and `planner.plan` only ever sees that snapshot — so
   the hourly `agents-fyi-mining-refresh` unit recomputes the queue for the site admin
   rather than for this process, and restarting the miner is what picks up a new

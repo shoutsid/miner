@@ -634,7 +634,7 @@ module AgentsFyiMiner
         named = paused.map(&:first).join(", ")
         log.warning(
           "every index this miner was asked for is paused (%s), so there is nothing to mine; " \
-          "`POST /admin/collection/<index>/resume` is what lifts it",
+          "`POST /api/admin/collection/<index>/resume` is what lifts it",
           named.empty? ? "none requested" : named
         )
         return 3

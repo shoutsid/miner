@@ -232,7 +232,7 @@ class RubyEnvsTest < MinerTest
   def test_the_inventory_reads_the_lines_the_script_prints
     # The script's own output, copied from a real run against `colorize` 0.8.1.
     output = [
-      '{"t":"header","loaded":true,"native":false,"dir":"/opt/g1/gems/colorize-0.8.1","entries":3}',
+      '{"t":"header","loaded":true,"native":false,"dir":"/opt/g1/api/gems/colorize-0.8.1","entries":3}',
       '{"t":"instance","name":"String#magenta","owner":"String","method":"magenta","params":[]}',
       '{"t":"constant","name":"Colorize::ClassMethods","owner":"Colorize::ClassMethods"}',
       '{"t":"singleton","name":"Colorize.new","owner":"Colorize","method":"new","params":["mode"]}'
@@ -381,10 +381,10 @@ class RubyEnvsTest < MinerTest
              "ERROR:  Error installing rubyXL:\n" \
              "\tERROR: Failed to build gem native extension.\n" \
              "\n    " \
-             "current directory: /tmp/gems/racc-1.8.1/ext/racc/cparse\n" \
+             "current directory: /tmp/api/gems/racc-1.8.1/ext/racc/cparse\n" \
              "make failedNo such file or directory - make\n" \
              "\n" \
-             "Gem files will remain installed in /tmp/gems/racc-1.8.1 for inspection.\n" \
+             "Gem files will remain installed in /tmp/api/gems/racc-1.8.1 for inspection.\n" \
              "Results logged to /tmp/extensions/x86_64-linux/3.3.0/racc-1.8.1/gem_make.out\n"
 
     with_stub(R, :capture, ->(*_args, **_kwargs) { result(status: 1, output: output) }) do

@@ -267,11 +267,11 @@ class WatchlistTest < MinerTest
     # own heading, and to the entry markup that heading introduces. The service has the same
     # reader in its own queue and this is the copy a client cannot avoid; both are driven against
     # this same markup.
-    page = '<nav><a href="/gems/not-a-ranking-entry">Sign in</a></nav>' \
+    page = '<nav><a href="/api/gems/not-a-ranking-entry">Sign in</a></nav>' \
            '<h3><span class="font-semibold">All Time Most Downloaded</span></h3>' \
-           '<h3><a class="text-orange-500" href="/gems/bundler">bundler</a></h3>' \
-           '<h3><a class="text-orange-500" href="/gems/rake">rake</a></h3>' \
-           '<footer><a href="/gems/not-a-ranking-entry-either">About</a></footer>'
+           '<h3><a class="text-orange-500" href="/api/gems/bundler">bundler</a></h3>' \
+           '<h3><a class="text-orange-500" href="/api/gems/rake">rake</a></h3>' \
+           '<footer><a href="/api/gems/not-a-ranking-entry-either">About</a></footer>'
 
     assert_equal %w[bundler rake], W.parse_gem_ranking(page)
     assert_equal [], W.parse_gem_ranking("<html><body>Nothing here</body></html>")
@@ -288,7 +288,7 @@ class WatchlistTest < MinerTest
     }
     asked = []
     fetch_recording(asked) do |url|
-      body = pages.fetch(url, []).map { |name| %(<h3><a href="/gems/#{name}">#{name}</a></h3>) }.join
+      body = pages.fetch(url, []).map { |name| %(<h3><a href="/api/gems/#{name}">#{name}</a></h3>) }.join
       "All Time Most Downloaded#{body}"
     end
 
