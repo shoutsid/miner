@@ -630,7 +630,7 @@ definitions has that leaf and that shape and runs that. On this deployment
 `tzinfo 2.0.6 removed TZInfo::CountryInfo` and
 `tzinfo 2.0.6 moved TZInfo::Country.init_countries` reached `resolved_verified`
 with two confirmations, each carrying the interpreter's own output as its
-evidence, and the console shows the index on every row and in the filter.
+evidence, and the site admin shows the index on every row and in the filter.
 
 Two rules came out of watching that happen, and both are about a *deep backlog*
 rather than about gems. A release this machine cannot build is one fact, not one
@@ -745,7 +745,7 @@ for what the API does not carry.
   version line, not a matching stack.
 - **The queue is read once, at startup.** `cli.serve` resolves `/mining/targets`
   once before the worker loop, and `planner.plan` only ever sees that snapshot — so
-  the hourly `agents-fyi-mining-refresh` unit recomputes the queue for the console
+  the hourly `agents-fyi-mining-refresh` unit recomputes the queue for the site admin
   rather than for this process, and restarting the miner is what picks up a new
   breadth order. The *demand* half is live: `plan` recomputes `demanded(reports)`
   from the change feed every cycle, so a newly opened report is prioritised

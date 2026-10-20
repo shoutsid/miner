@@ -42,7 +42,7 @@ module AgentsFyiMiner
     RANKING = "https://hugovk.github.io/top-pypi-packages/top-pypi-packages.min.json"
 
     # What this ranking is called when it is handed to the service as a breadth seed. One string,
-    # and it is the same one the service records — the console displays it, so a deployment whose
+    # and it is the same one the service records — the site admin displays it, so a deployment whose
     # seed came from somewhere else would say so rather than showing this name over somebody
     # else's list.
     SEED_SOURCE = "top-pypi-packages"
