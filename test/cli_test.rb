@@ -156,6 +156,37 @@ class CliTest < MinerTest
     assert_includes out, "--package"
   end
 
+  def test_version_prints_the_client_version_and_is_not_a_run
+    status = nil
+    out, err = capture_io { status = C.main(["--version"]) }
+
+    assert_equal 0, status
+    assert_equal "#{AgentsFyiMiner::VERSION}\n", out
+    assert_empty err
+  end
+
+  def test_mine_prints_without_registering_or_filing
+    args = parse(["mine", "--package", "httpx", "--from", "1.0", "--to", "2.0",
+                  "--home", @home.to_s])
+    C.resolve_defaults(args)
+    pair = AgentsFyiMiner::Pair.of(package: "httpx", from_version: "1.0", to_version: "2.0")
+
+    original_resolve = C.method(:resolve_pairs)
+    original_mine = C.method(:mine_pair)
+    C.define_singleton_method(:resolve_pairs) { |*_args, **_kwargs| [pair] }
+    C.define_singleton_method(:mine_pair) { |*_args, **_kwargs| [] }
+
+    status = nil
+    _out, err = capture_io { status = C.run_once(args) }
+
+    assert_equal 0, status
+    assert_includes err, "nothing was filed"
+    refute File.exist?(@home + "operator.json"), "mine registered an operator and could have filed"
+  ensure
+    C.define_singleton_method(:resolve_pairs, original_resolve) if original_resolve
+    C.define_singleton_method(:mine_pair, original_mine) if original_mine
+  end
+
   def test_main_answers_a_usage_error_with_argparses_status
     status = nil
     _out, err = capture_io { status = C.main(%w[mine --nope]) }

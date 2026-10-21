@@ -6,14 +6,14 @@ require_relative "test_helper"
 
 # The one-off `solve`: which reports it will work on, and which it leaves alone.
 #
-# Two subjects in one file, which is deliberate: both are about the *contract with the service*
-# rather than about arithmetic of the miner's own. The first half is the walk that decides which
-# reports are this miner's to answer — and the omission it records was a real one, where the command
-# selected sixteen of its own reports and set about running a full differential against each, minutes
-# apiece, to reach a conclusion the corpus already held. The second half reads the service's own
-# `change_kind` enum out of its schema and checks that every mechanism this client can establish is a
-# value the service accepts, because a kind the service refuses is a report that cannot be filed at
-# all and the failure appears as a 422 in a container nobody is reading.
+# The first half is the walk that decides which reports are this miner's to answer — and the
+# omission it records was a real one, where the command selected sixteen of its own reports and set
+# about running a full differential against each, minutes apiece, to reach a conclusion the corpus
+# already held. The second half is what a filed finding carries on the wire, driven without a server.
+#
+# The service's own `change_kind` vocabulary is checked against this client's mechanisms in the
+# service's contract suite (`test/contracts/miner/`), not here: the enum lives in the service's
+# schema, and a standalone checkout has no copy of it to compare against.
 #
 # What *is* testable about them without installing anything is the walk, and that is what
 # these tests cover.
@@ -97,36 +97,7 @@ class CliReportsTest < MinerTest
     assert_raises(AgentsFyiMiner::Errors::CorpusError) { R.open_questions(down) }
   end
 
-  # --- the vocabulary, against the service's own schema --------------------------------
-
-  # Read from the *schema* rather than from the service's source, because the client does not depend
-  # on the service in either direction: `db/structure.sql` is the deployed database's own
-  # `CREATE TYPE public.change_kind AS ENUM (...)`, which is data and outlives the code that wrote it.
-  SCHEMA_CANDIDATES = [
-    Pathname.new(__dir__) + "../../../db/structure.sql",
-    Pathname.new(ENV.fetch("MINER_REPO", "/repo")) + "db/structure.sql"
-  ].freeze
-
-  CHANGE_KIND_TYPE = /CREATE TYPE public\.change_kind AS ENUM \(((?:\s+'[a-z_]+',?)+\s*)\)/
-
-  def service_kinds
-    schema = SCHEMA_CANDIDATES.find(&:file?)
-    skip "no repository copy of db/structure.sql to check against" if schema.nil?
-
-    body = CHANGE_KIND_TYPE.match(schema.read(encoding: "utf-8"))
-    assert body, "change_kind's declaration could not be found in the schema"
-    body[1].scan(/'([a-z_]+)'/).flatten
-  end
-
-  def test_the_service_accepts_every_mechanism_the_miner_can_establish
-    assert_equal AgentsFyiMiner::Mechanism::ALL.sort, service_kinds.sort
-  end
-
-  def test_the_reader_actually_finds_the_services_declaration
-    # A guard on the guard: the comparison above is a set equality and would pass vacuously against a
-    # pattern that matched nothing.
-    assert_equal 5, service_kinds.length
-  end
+  # --- what a filed finding carries ----------------------------------------------------
 
   # --- what a filed finding carries ----------------------------------------------------
 
@@ -153,7 +124,7 @@ class CliReportsTest < MinerTest
     assert_equal "0.27.2", payload["from_version"]
     assert_equal "proxies", payload["subject"]
     assert_equal "parameter_renamed", payload["change_kind"]
-    assert_includes service_kinds, payload["change_kind"]
+    assert_includes AgentsFyiMiner::Mechanism::ALL, payload["change_kind"]
   end
 
   def test_the_subject_sent_is_the_bare_name_the_service_stores

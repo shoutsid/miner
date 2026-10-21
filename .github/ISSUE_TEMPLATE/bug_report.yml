@@ -1,0 +1,101 @@
+name: Bug report
+description: Report a reproducible problem with the miner.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem. Please search the existing issues and
+        read [Troubleshooting](https://github.com/shoutsid/miner/blob/main/docs/troubleshooting.md)
+        first.
+
+        **Do not paste an operator key, a private package name or a package's private source.**
+        Redact the log before attaching it. Security reports go through
+        [SECURITY.md](https://github.com/shoutsid/miner/blob/main/SECURITY.md), not this form.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `agents-fyi-miner --version`, the image tag, or the commit.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system, Ruby and Python
+      description: For example "Ubuntu 24.04, Ruby 3.3.12, Python 3.12.7, cc present".
+      placeholder: "Ubuntu 24.04, Ruby 3.3.12, Python 3.12.7, cc present"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - mine
+        - publish
+        - solve
+        - serve
+        - verify
+    validations:
+      required: true
+
+  - type: input
+    id: ecosystem
+    attributes:
+      label: Index
+      description: PyPI, RubyGems, or both. For a verifier, the report's index.
+      placeholder: "PyPI"
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The exact command and flags, with the service URL but no key.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: What should have happened, and why.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: The exit code, the cycle line, and the relevant log lines. Redact secrets.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: The smallest package pair, report or sequence that shows the problem. A public package and two versions are ideal.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched the existing issues.
+          required: true
+        - label: I read the troubleshooting guide.
+          required: true
+        - label: I removed keys, tokens and private source from this report.
+          required: true

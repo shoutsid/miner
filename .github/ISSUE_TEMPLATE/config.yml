@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/shoutsid/miner/blob/main/docs/README.md
+    about: Getting started, the CLI, configuration, architecture and troubleshooting.
+  - name: Security report
+    url: https://github.com/shoutsid/miner/blob/main/SECURITY.md
+    about: Report a vulnerability privately. Do not open a public issue.
+  - name: Support
+    url: https://github.com/shoutsid/miner/blob/main/SUPPORT.md
+    about: What to include in an issue, and what is not supported.

@@ -229,6 +229,10 @@ module AgentsFyiMiner
             $stdout.puts parser.to_s
             help[:requested] = true
           end
+          parser.on("--version", "Show the client version") do
+            $stdout.puts(AgentsFyiMiner::VERSION)
+            help[:requested] = true
+          end
           parser.on("--package PACKAGE", "mine this package (repeatable)") { |value| args.package << value }
           parser.on("--top N", Integer,
             "how many packages to work on when none are named (default 3000, or MINER_TOP)") do |value|
@@ -515,11 +519,20 @@ module AgentsFyiMiner
       []
     end
 
-    # `publish` and `solve`: one pass, and a summary of what it did.
+    # `mine`, `publish` and `solve`: one pass, and a summary of what it did.
+    #
+    # `mine` is the local mode and does not create an operator. That distinction was nearly
+    # lost: both one-shot modes ran the same function, so `mine` registered an account and
+    # submitted every finding it printed. A command whose documented job is to show you what
+    # a pair breaks must not write it to a shared corpus.
     def self.run_once(args, solve_only: false)
-      state = args.state || (args.home + "operator.json")
-      key = Corpus.load_or_register(args.base_url, state, name: MINER_NAME, email: MINER_EMAIL)
-      session = Corpus.new(base_url: args.base_url, api_key: key)
+      publishing = args.command == "publish"
+      session = nil
+      if publishing || solve_only
+        state = args.state || (args.home + "operator.json")
+        key = Corpus.load_or_register(args.base_url, state, name: MINER_NAME, email: MINER_EMAIL)
+        session = Corpus.new(base_url: args.base_url, api_key: key)
+      end
 
       return CliReports.profile(session, args) if solve_only
 
@@ -530,14 +543,18 @@ module AgentsFyiMiner
       end
 
       filed = 0
+      found = 0
       pairs.each do |pair|
         findings = mine_pair(pair, args)
         findings = findings.first(args.limit) if args.limit.positive?
         findings.each do |finding|
+          found += 1
           $stderr.puts(Reporting.summary_for(finding))
           if args.json
             puts JSON.pretty_generate(Reporting.payload_for(finding, from_version: pair.from_version))
           end
+          next unless publishing
+
           outcome = session.submit_mined(finding, from_version: pair.from_version, pace: 1.0,
             dry_run: args.dry_run)
           $stderr.puts("[#{outcome}] #{finding.title}")
@@ -546,8 +563,12 @@ module AgentsFyiMiner
           end
         end
       end
-      verb = args.dry_run ? "would file" : "filed"
-      $stderr.puts("#{verb} #{filed} finding(s)")
+      if publishing
+        verb = args.dry_run ? "would file" : "filed"
+        $stderr.puts("#{verb} #{filed} finding(s)")
+      else
+        $stderr.puts("found #{found} finding(s); nothing was filed")
+      end
       0
     end
 

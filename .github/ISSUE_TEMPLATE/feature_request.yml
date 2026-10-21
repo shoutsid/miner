@@ -1,0 +1,73 @@
+name: Feature request
+description: Propose a change to the client, its documentation or its deployment shape.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This repository is proprietary. A feature request is a proposal, not a promise, and a
+        change that is accepted may require a separate written agreement with the copyright
+        holder. Please describe the problem before the solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that the tool does not let you do today? Include the package pair, the command and the constraint.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What should the tool do instead? If it changes a flag, a default, an exit status, a state file or a report field, say which.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What have you tried, and why is it not enough? A second tool, a wrapper, a service change or a narrower rule are all valid answers.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI and exit status
+        - PyPI differential
+        - RubyGems differential
+        - planner and queue
+        - ledger and state
+        - environments and caches
+        - bandwidth and deadlines
+        - solving and verification
+        - advisories
+        - reports and the service API
+        - documentation
+        - deployment
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and compatibility
+      description: Would this change an existing ledger, exit status, flag, report field or state file? Does it add a dependency? Does it need a service change?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched the existing issues and the documentation.
+          required: true
+        - label: I have read CONTRIBUTING.md and understand this is a proprietary repository.
+          required: true

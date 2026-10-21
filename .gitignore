@@ -1,0 +1,21 @@
+# State and run artifacts
+ledger*.json
+operator*.json
+heartbeat*
+envs/
+rubyenvs/
+index/
+tmp/
+probe-home/
+*.log
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
+.direnv/

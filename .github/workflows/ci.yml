@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3.12"
+
+      - name: Check Ruby syntax
+        run: |
+          find . -name '*.rb' -not -path './.git/*' -print0 |
+            while IFS= read -r -d '' file; do
+              ruby -c "$file" > /dev/null || exit 1
+            done
+
+      - name: Check shell syntax
+        run: |
+          find . -name '*.sh' -not -path './.git/*' -print0 |
+            while IFS= read -r -d '' file; do
+              bash -n "$file" || exit 1
+            done
+
+      - name: Run the suite
+        run: ruby -Ilib -Itest test/all_test.rb
+
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: test
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          tags: agentsfyi-miner:ci
+          cache-from: type=gha,scope=miner
+          cache-to: type=gha,mode=max,scope=miner
+
+      - name: The image runs the Ruby client
+        run: docker run --rm --entrypoint ruby agentsfyi-miner:ci /app/bin/agents-fyi-miner --version
+
+      - name: The image can print usage without a service
+        run: docker run --rm --entrypoint ruby agentsfyi-miner:ci /app/bin/agents-fyi-miner --help

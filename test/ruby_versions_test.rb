@@ -6,26 +6,12 @@ require_relative "test_helper"
 #
 # The ordering below is a copy of `Gem::Version`'s rule, and the table it is written from was
 # produced by running each pair through a real `Gem::Version` in a container — the only thing that
-# makes a reimplementation of somebody else's rule worth anything. The service calls the real
-# thing (`Gem::Version#<=>` in `lib/agents_fyi_service/version.rb`), so this is the only
-# copy left and the recording at `test/agents_fyi/fixtures/version_order.json` is what it answers to;
-# this file holds the two together, and `scripts/ruby-client-probe.py` re-runs both through the
-# container when a Ruby is available.
+# makes a reimplementation of somebody else's rule worth anything.
 #
-# `scripts/clear-pair-defects` is where that rule lives now.
+# The table is checked against the frozen recording of a real `Gem::Version` in the service's
+# contract suite (`test/contracts/miner/version_order_test.rb`), not here: the recording belongs to
+# the service, and a standalone checkout has no copy of it.
 class RubyVersionsTest < MinerTest
-  # The recorded answers of a real `Gem::Version`, from the fixture the service's suite
-  # drives.
-  #
-  # Two spellings because the fixture belongs to the service and the suite may be run with only one
-  # of the two trees mounted — the repository whole, or the client alone. Absent everywhere, the
-  # test skips out loud rather than passing: a cross-check that silently stopped checking is worse
-  # than one that says it could not run (the rule `test/support/service_test_db.rb` follows).
-  ORDER_FIXTURE = [
-    Pathname.new(__dir__) + "../../../test/agents_fyi/fixtures/version_order.json",
-    Pathname.new(ENV.fetch("MINER_REPO", "/repo")) + "test/agents_fyi/fixtures/version_order.json"
-  ].find(&:file?)
-
   RUBYGEMS_ORDER = [
     ["1.0", "1.0.0", 0],
     ["1.0.0.pre", "1.0.0", -1],
@@ -69,26 +55,6 @@ class RubyVersionsTest < MinerTest
       assert_equal expected, versions.compare(left, right), "#{left} <=> #{right}"
       assert_equal(-expected, versions.compare(right, left), "#{right} <=> #{left}")
     end
-  end
-
-  def test_the_table_above_is_the_recorded_table_rather_than_a_similar_one
-    # Every pair here has a recorded `Gem::Version` answer, and the two agree.
-    #
-    skip "no repository copy of test/agents_fyi/fixtures/version_order.json to check against" unless ORDER_FIXTURE
-
-    pairs = JSON.parse(ORDER_FIXTURE.read(encoding: "utf-8")).fetch("pairs")
-    recorded = pairs.to_h { |left, right, expected| [[left, right], expected] }
-    assert_operator recorded.length, :>=, 20, "the frozen ordering recording has shrunk"
-
-    unrecorded = RUBYGEMS_ORDER.filter_map do |left, right, _|
-      [left, right] unless recorded.key?([left, right])
-    end
-    assert_equal [], unrecorded, "ordering pairs a real Gem::Version was never run on"
-
-    disagreed = RUBYGEMS_ORDER.filter_map do |left, right, expected|
-      [[left, right], [expected, recorded[[left, right]]]] unless recorded[[left, right]] == expected
-    end
-    assert_equal [], disagreed, "this copy disagrees with the recording"
   end
 
   def test_a_dash_is_a_prerelease_separator_rather_than_a_zero_width_dot
