@@ -17,7 +17,7 @@ own answer.
 | `GET` | `/api/health` | `entrypoint.sh` | waits for the service before starting either loop |
 
 Registration is rate limited, which is why the key is reused rather than requested on every
-run. `mine` with an explicit package does not register at all.
+run. `mine` never registers and never calls the service.
 
 ## Reports
 

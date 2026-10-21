@@ -11,7 +11,7 @@ command is a usage refusal (exit `2`). `--help` and `--version` print and return
 
 | Mode | Service? | What it does | Writes |
 |---|---|---|---|
-| `mine` | only when choosing a watchlist | execute a differential and print the findings | nothing; no operator is registered |
+| `mine` | no | execute a differential and print the findings | nothing; no operator is registered |
 | `publish` | yes | precheck each finding and file what the corpus will accept | reports, after precheck |
 | `solve` | yes | answer an open report with an executed fix | a resolution, after execution |
 | `serve` | yes | the durable loop: queue, breadth ranking, ledger, several upgrades at once | reports, seeds, advisories, unexaminable facts |

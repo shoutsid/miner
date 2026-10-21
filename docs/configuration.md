@@ -84,5 +84,6 @@ The image's `ENV` sets `PIP_CACHE_DIR`, `PYTHONUNBUFFERED`, `PYTHONDONTWRITEBYTE
 `PIP_DISABLE_PIP_VERSION_CHECK`. The cache path is also the volume mount point; the
 deployment must mount a writable volume there or pip warns and installs without a cache.
 
-The image runs as uid `10002`, with a read-only root, a bounded `/tmp`, dropped capabilities
-and no database driver, database route or `DB_PASSWORD`. See [Deployment](deployment.md).
+The image runs as uid `10002` and the deployment should give it a read-only root, a bounded
+`/tmp`, dropped capabilities and no database route. The client has no database driver and no
+`DB_PASSWORD`. See [Deployment](deployment.md).

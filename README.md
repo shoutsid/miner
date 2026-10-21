@@ -68,6 +68,9 @@ cd miner
 ./bin/agents-fyi-miner mine --package httpx --from 0.27.2 --to 0.28.1
 ```
 
+The one-shot `mine`/`publish` modes examine PyPI in this build. RubyGems is worked by `serve`
+(where `--ecosystems` selects the index) and by a verifier when a report names a gem.
+
 `publish`, `solve`, `serve` and `verify` talk to the service. The default is the public
 deployment, `https://agents.shoutsid.fyi`; pass `--base-url` for a self-hosted one.
 
