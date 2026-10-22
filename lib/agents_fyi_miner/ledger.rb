@@ -248,13 +248,13 @@ module AgentsFyiMiner
     end
 
     attr_accessor :pairs, :reports, :backlog, :releases, :release_interpreters, :statuses,
-      :cursor_since, :cursor_id, :machine
+      :report_ecosystems, :cursor_since, :cursor_id, :machine
     # `record_pair` drops both, which is the only way either can become stale.
     attr_accessor :unbuildable_index, :totals_index
 
     def initialize(pairs: {}, reports: {}, backlog: {}, releases: {},
-                   release_interpreters: {}, statuses: {}, cursor_since: nil, cursor_id: nil,
-                   machine: MACHINE)
+                   release_interpreters: {}, statuses: {}, report_ecosystems: {},
+                   cursor_since: nil, cursor_id: nil, machine: MACHINE)
       @pairs = pairs
       @reports = reports
       # Every report this miner has *seen*, whether or not it has attempted it.
@@ -282,6 +282,11 @@ module AgentsFyiMiner
       # because the backlog's value is a *time* and its ordering is the whole reason it exists;
       # this is a fact that is overwritten every pass.
       @statuses = statuses
+      # `report id -> the ecosystem the feed last reported`, which is what lets a verifier that
+      # works one index pass over the other's reports without fetching each body to find out.
+      # Additive with an empty default, like the status map: a ledger written before the field
+      # existed still reads, and the first walk that does know the ecosystem fills it.
+      @report_ecosystems = report_ecosystems
       # Where in the corpus's change feed this miner has read to. Kept here rather than in a
       # second file because it is the same kind of fact as the rest of the ledger — "what this
       # miner has already seen" — and because a cursor advanced separately from the work it
@@ -544,19 +549,29 @@ module AgentsFyiMiner
     # report in the corpus is the one nobody has got to, and it is worth more to whoever is
     # still hitting it than one filed an hour ago.
     #
-    # `status` is *last*-seen, and it is the exception to that rule for the same reason the order
-    # exists: a report's status is what decides whether it is worth reading at all, and the feed
-    # carries it. A client that has to fetch the body to learn "already confirmed" spends one
-    # request per settled report in the corpus every pass, and — worse — spends its *look* budget
-    # on them, so a backlog of 2,933 mostly-settled reports kept this verifier 2,933 reports away
-    # from work filed an hour ago.
-    def note_seen(report_id, now: nil, status: "")
+    # `status` and `ecosystem` are *last*-seen, and they are the exception to that rule for the
+    # same reason the order exists: a report's status is what decides whether it is worth reading
+    # at all, and the feed carries it. A client that has to fetch the body to learn "already
+    # confirmed" spends one request per settled report in the corpus every pass, and — worse —
+    # spends its *look* budget on them, so a backlog of 2,933 mostly-settled reports kept this
+    # verifier 2,933 reports away from work filed an hour ago.
+    #
+    # `ecosystem` is the same fact for a different question: a verifier scoped to one index must
+    # not spend a body read on every report of the other one to find out it is out of scope.
+    def note_seen(report_id, now: nil, status: "", ecosystem: "")
       @backlog[report_id] = now.nil? ? Time.now.to_f : now unless @backlog.key?(report_id)
       @statuses[report_id] = status unless status.empty?
+      @report_ecosystems[report_id] = ecosystem.to_s unless ecosystem.to_s.empty?
     end
 
     # What the feed last said this report's status was, or `""` if it never did.
     def status_of(report_id) = @statuses.fetch(report_id, "")
+
+    # What the feed last said this report's ecosystem was, or `""` if it never did.
+    #
+    # Empty is not "python": a ledger written before this field existed has no answer, and the
+    # reader must fetch the body rather than guess the default and skip the wrong index.
+    def ecosystem_of(report_id) = @report_ecosystems.fetch(report_id, "")
 
     def seen?(report_id) = @backlog.key?(report_id)
 
@@ -617,6 +632,7 @@ module AgentsFyiMiner
         "releases" => @releases,
         "release_interpreters" => @release_interpreters,
         "statuses" => @statuses,
+        "report_ecosystems" => @report_ecosystems,
         "cursor_since" => @cursor_since,
         "cursor_id" => @cursor_id
       }
@@ -643,6 +659,9 @@ module AgentsFyiMiner
           [key, value.to_s]
         end,
         statuses: (payload["statuses"] || {}).to_h { |key, value| [key, value.to_s] },
+        report_ecosystems: (payload["report_ecosystems"] || {}).to_h do |key, value|
+          [key, value.to_s]
+        end,
         cursor_since: payload["cursor_since"],
         cursor_id: payload["cursor_id"]
       )

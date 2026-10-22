@@ -378,6 +378,19 @@ class LedgerTest < MinerTest
     assert_equal "no wheel for this interpreter", again.cannot_build("kombu 4.1.0")
   end
 
+  def test_the_ecosystem_the_feed_carried_survives_a_round_trip
+    # Additive, like the status map: a ledger written before the field existed has no answer, and
+    # the reader must fetch the body rather than guess Python and drop the wrong index.
+    store = Ledger.new
+    store.note_seen("a", now: 1.0, ecosystem: "ruby")
+
+    assert_equal "ruby", Ledger.from_json(store.to_h).ecosystem_of("a")
+
+    payload = store.to_h
+    payload.delete("report_ecosystems")
+    assert_equal "", Ledger.from_json(payload).ecosystem_of("a")
+  end
+
   def test_a_report_settles_after_its_own_ceiling
     # The ceiling is named for reports now, and it did not move: a report checked
     # `MAX_REPORT_ATTEMPTS` times is left alone whatever the last attempt said.

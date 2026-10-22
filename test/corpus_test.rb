@@ -229,6 +229,26 @@ class CorpusTest < MinerTest
     assert_includes error.message, "POST /api/admin/collection/python/resume"
   end
 
+  # A verifier has its own backlog and does not need the queue; it needs the one fact the queue
+  # states before it computes anything. `limit=1` is what keeps that a probe rather than a second
+  # work list.
+  def test_the_pause_probe_asks_the_queue_for_the_smallest_page
+    http = answer_json({
+      "targets" => [], "count" => 0, "ecosystem" => "ruby", "paused" => true,
+      "paused_reason" => "Ruby is being brought up first"
+    })
+
+    assert client(http).collection_paused?("ruby")
+    assert_includes http.calls.first[:url], "limit=1"
+    assert_includes http.calls.first[:url], "ecosystem=ruby"
+  end
+
+  def test_a_collecting_index_is_not_paused
+    http = answer_json({ "targets" => [], "count" => 0, "ecosystem" => "ruby", "paused" => false })
+
+    refute client(http).collection_paused?("ruby")
+  end
+
   # Registration is rate limited to ten an hour from one address, so the key is written once
   # and read back — and it is written as a credential (`0600`), because that is what it is.
   def test_a_key_is_registered_once_and_remembered

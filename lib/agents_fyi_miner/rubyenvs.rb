@@ -39,10 +39,11 @@ module AgentsFyiMiner
   # `source_location` filter, and the fallback below is stated rather than hidden.
   module RubyEnvs
     # The floor on how long a gem install may take, and what a probe gets when nothing says
-    # otherwise. A gem that hangs on require is one this miner cannot say anything about, and
-    # waiting for it would stall a run with hundreds of pairs left.
-    INSTALL_TIMEOUT = 300
-    RUN_TIMEOUT = 60
+    # otherwise. It is generous on purpose: an install killed at the floor has to be bought
+    # again, so the cost of a floor that is too low is a corpus that never gets an answer,
+    # while the cost of one that is too high is bounded by the ceiling below.
+    INSTALL_TIMEOUT = 600
+    RUN_TIMEOUT = 120
 
     # What an install gets at most, and what a retry multiplies its deadline by.
     #
@@ -52,7 +53,7 @@ module AgentsFyiMiner
     # honest rule. The retry factor stays because the evidence it encodes is the same: an install
     # that ran out of time had the environment already on its way, so the second attempt gets
     # more room.
-    MAX_INSTALL_TIMEOUT = 1800
+    MAX_INSTALL_TIMEOUT = 3600
     INSTALL_RETRY_FACTOR = 2
 
     # What the gem's own directory is called under the cache root, and the scratch directory its

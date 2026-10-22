@@ -104,6 +104,21 @@ class ArtifactTest < MinerTest
     end
   end
 
+  def test_both_modes_scope_themselves_to_the_deployment_s_index
+    # The deployment collects one index and the other is paused. A verifier that omitted
+    # `--ecosystems` would fall back to the CLI's own default and install two releases per
+    # report only to learn that every vote is refused, so both invocations name the scope
+    # and the image's fallback is the index this deployment actually works.
+    invocations = entrypoint.scan(
+      /exec ruby \/app\/bin\/agents-fyi-miner (?:serve|verify)(?:[^\n]*\\\n)*[^\n]*/
+    )
+    assert_equal 2, invocations.length, "the entrypoint does not start both modes"
+    invocations.each do |line|
+      assert_includes line, "--ecosystems \"${MINER_ECOSYSTEMS}\""
+    end
+    assert_includes entrypoint, ': "${MINER_ECOSYSTEMS:=ruby}"'
+  end
+
   def test_the_command_and_the_entrypoint_are_executable
     assert File.executable?(BIN_PATH), "bin/agents-fyi-miner is not executable"
     assert File.executable?(ENTRYPOINT_PATH), "entrypoint.sh is not executable"

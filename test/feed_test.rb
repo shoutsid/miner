@@ -62,6 +62,25 @@ class FeedTest < MinerTest
     refute store.seen?("c"), "a retracted report is not work"
   end
 
+  def test_the_walk_files_the_ecosystem_the_feed_carries
+    # The second half of the same fact: a verifier scoped to one index can pass over the other's
+    # reports without fetching a body, which is what keeps a paused index's backlog from spending
+    # the walk's look budget before the open one is reached.
+    session = Session.new(
+      [
+        { "id" => "a", "status" => "resolved_unverified", "ecosystem" => "ruby" },
+        { "id" => "b", "status" => "resolved_unverified", "ecosystem" => "python" }
+      ]
+    )
+    store = ledger
+
+    F.walk(session, store, since: nil, since_id: nil)
+
+    assert_equal "ruby", store.ecosystem_of("a")
+    assert_equal "python", store.ecosystem_of("b")
+    assert_equal "", store.ecosystem_of("never-seen")
+  end
+
   def test_the_walk_keeps_the_position_the_service_sent
     # Taken from every page, including the last one, because it is the service's own position of the
     # last row it sent: a cursor the client computes from its clock can drift ahead of rows it has

@@ -61,9 +61,10 @@ module AgentsFyiMiner
 
     # How many reports a verifier checks per cycle. Lower than the miner's budget for a reason that
     # is about cost rather than patience: every report is a release of its own to install, and a
-    # cycle that installs twenty-four wheels before it records anything is a cycle whose first vote
-    # is minutes away.
-    VERIFY_BUDGET = 6
+    # cycle that installs a dozen wheels before it records anything is a cycle whose first vote
+    # is minutes away. The installs run in parallel, so the wall clock is set by the pool rather
+    # than by the batch.
+    VERIFY_BUDGET = 12
 
     # Who the verifying operators are, one identity per method. Two accounts and not one: the
     # service counts *distinct* operators, so a single account checking twice would record one
@@ -709,7 +710,12 @@ module AgentsFyiMiner
         dry_run: args.dry_run,
         heartbeat: args.heartbeat || args.home + "heartbeat-#{args.role}",
         writes_per_hour: args.writes_per_hour,
-        workers: args.workers
+        workers: args.workers,
+        # The deployment's own scope, not this file's default: an index that has been turned off
+        # should not have a verifier installing two releases per report to discover that every
+        # vote is refused. `Ecosystems.named` is the one reader of the name, and it refuses a
+        # misspelling rather than quietly working nothing.
+        ecosystems: Ecosystems.named(args.ecosystems)
       )
       logger = Log.logger("agents_fyi_miner.verifier")
       logger.info("starting: %s against %s as %s, %d report(s) already checked",

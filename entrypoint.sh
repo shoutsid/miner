@@ -24,7 +24,7 @@ set -eu
 : "${API_BASE_URL:=http://service:8001}"
 : "${MINER_HOME:=/home/miner/.cache/agents-fyi-miner}"
 : "${MINER_MODE:=serve}"
-: "${MINER_BUDGET:=24}"
+: "${MINER_BUDGET:=48}"
 : "${MINER_REPORT_BUDGET:=1}"
 # How many packages the watchlist holds. The list has to outlast the work: at the
 # rate this deployment mines (~4,600 pairs a day, twelve crossings a package) a
@@ -36,7 +36,11 @@ set -eu
 : "${MINER_TOP:=3000}"
 # 0 is no limit: the service's quota is not the constraint, the work is.
 : "${MINER_WRITES_PER_HOUR:=0}"
-: "${MINER_WORKERS:=6}"
+: "${MINER_WORKERS:=2}"
+# Which index the interval works. The deployment collects one — PyPI is paused — and an
+# image that silently fell back to Python would build environments for votes the service
+# refuses. An operator overriding this is a deliberate act rather than an omission.
+: "${MINER_ECOSYSTEMS:=ruby}"
 # 0 is no ceiling. How much of the link a background service may take is the
 # operator's decision about their own connection, so this is off unless asked for;
 # set it below what the miner would otherwise pull (about 2.8 MB/s while mining).
@@ -46,7 +50,7 @@ set -eu
 # it from the two releases. Both services run this image and differ in this and in
 # their home directory.
 : "${VERIFIER_ROLE:=as-reported}"
-: "${VERIFIER_BUDGET:=6}"
+: "${VERIFIER_BUDGET:=12}"
 
 echo "miner: waiting for ${API_BASE_URL}/api/health"
 attempt=0
@@ -90,6 +94,7 @@ if [ "${MINER_MODE}" = "verify" ]; then
         --workers "${MINER_WORKERS}" \
         --writes-per-hour "${MINER_WRITES_PER_HOUR}" \
         --download-mbps "${MINER_DOWNLOAD_MBPS}" \
+        --ecosystems "${MINER_ECOSYSTEMS}" \
         ${common} "$@"
 fi
 
@@ -102,4 +107,5 @@ exec ruby /app/bin/agents-fyi-miner serve \
     --writes-per-hour "${MINER_WRITES_PER_HOUR}" \
     --workers "${MINER_WORKERS}" \
     --download-mbps "${MINER_DOWNLOAD_MBPS}" \
+    --ecosystems "${MINER_ECOSYSTEMS}" \
     ${common} "$@"

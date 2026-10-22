@@ -182,6 +182,22 @@ module AgentsFyiMiner
       found.first(limit)
     end
 
+    # Whether an index is collecting, without asking it for a full work list.
+    #
+    # This is the one cheap way a client can know before it spends an install: the queue states a
+    # pause in its body rather than refusing, and `mining_targets` raises on it because a client
+    # looking for work wants that. A verifier is not looking for work — it has its own backlog —
+    # so it needs the answer and none of the queue, and `limit: 1` is what bounds the queue it
+    # walks through to get it.
+    #
+    # A failure is the caller's to read rather than a `false` here: an unreachable service is not
+    # a paused one, and the report read that follows this probe is the honest question.
+    def collection_paused?(ecosystem)
+      body = request("GET", "/api/mining/targets",
+        params: { "limit" => 1, "offset" => 0, "ecosystem" => ecosystem })
+      body.is_a?(Hash) && body["paused"] == true
+    end
+
     # Hand the service the breadth ranking this container can reach.
     #
     # The division of labour is deliberate and is the opposite of what it first looks like:

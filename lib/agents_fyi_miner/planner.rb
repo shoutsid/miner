@@ -79,7 +79,7 @@ module AgentsFyiMiner
     # worth reading. It is bounded because a cycle is also a log line and a ledger write, and
     # "everything left in the watchlist" would be one enormous batch whose failure loses all of
     # it.
-    DEFAULT_BUDGET = 24
+    DEFAULT_BUDGET = 48
 
     # Every way a release history can fail to arrive except the index answering with a payload.
     #

@@ -21,6 +21,7 @@ class VerifierTest < MinerTest
     "id" => "00000000-0000-0000-0000-000000000001",
     "library" => "httpx",
     "version" => "0.28.1",
+    "ecosystem" => "python",
     "subject_kind" => "package",
     "status" => "resolved_unverified",
     "resolution" => "`app=` is gone in httpx 0.28.1. Pin below this release.",
@@ -77,7 +78,7 @@ class VerifierTest < MinerTest
 
   # The corpus, with the feed, the bodies and the writes recorded.
   class FakeSession
-    attr_accessor :rows, :bodies, :transient, :after_submit
+    attr_accessor :rows, :bodies, :transient, :after_submit, :paused
     attr_reader :calls, :submit_error
 
     def initialize(rows = [], submit_error: nil, transient: false)
@@ -87,6 +88,7 @@ class VerifierTest < MinerTest
       @submit_error = submit_error
       @transient = transient
       @after_submit = nil
+      @paused = {}
     end
 
     def me
@@ -100,6 +102,13 @@ class VerifierTest < MinerTest
       # `has_more`. The builder is the test's own, so it is reached through the block the test
       # installs — `pager`.
       @pager.call(@rows, since: since, since_id: since_id, limit: limit)
+    end
+
+    # Whether the index is collecting, as the queue's own body says. A test that does not set
+    # this is a deployment where everything collects, which is the ordinary case.
+    def collection_paused?(ecosystem)
+      @calls << [:collection_paused, ecosystem]
+      @paused.fetch(ecosystem.to_s, false)
     end
 
     attr_writer :pager
@@ -228,6 +237,65 @@ class VerifierTest < MinerTest
 
     assert_empty session.calls.select { |call| call[0] == :verify }
     assert_equal 0, stats.reproduced
+  end
+
+  def test_a_report_from_an_index_this_verifier_does_not_work_is_dropped_without_a_read
+    # The feed row carries the ecosystem, so the scope decision costs no body read and — the half
+    # that matters — no look. A verifier that read first would spend its walk on the other index
+    # before reaching the one it was asked to work.
+    session = fake_session([REPORTED, GEM_REPORT])
+    instance = verifier_for(session, ecosystems: [AgentsFyiMiner::Ecosystems::RUBY])
+
+    instance.one_cycle
+
+    assert_nil session.calls.find { |call| call[0] == :report && call[1] == REPORTED["id"] },
+      "the Python report is out of scope, so its body is never fetched"
+    voted = session.calls.select { |call| call[0] == :verify }.map { |call| call[1] }
+    assert_equal [GEM_REPORT["id"]], voted
+    ledger = AgentsFyiMiner::Ledger.load(instance.state)
+    refute ledger.seen?(REPORTED["id"]), "a scope the deployment chose is not reconsidered every pass"
+    assert ledger.seen?(GEM_REPORT["id"])
+  end
+
+  def test_a_paused_index_keeps_its_reports_without_installing_them
+    # A pause is a decision somebody made and can undo, so the report stays in the backlog. What
+    # it must not do is cost two installs to learn that the vote would be refused: the queue states
+    # the pause, and the verifier asks before it reads a report.
+    session = fake_session([GEM_REPORT])
+    session.paused = { "ruby" => true }
+    instance = verifier_for(session, ecosystems: [AgentsFyiMiner::Ecosystems::RUBY])
+
+    stats = instance.one_cycle
+
+    assert_empty session.calls.select { |call| call[0] == :verify }
+    assert_nil session.calls.find { |call| call[0] == :report },
+      "the index is paused, so there is nothing worth reading a report for"
+    assert_equal 1, stats.paused
+    assert_includes stats.summary, "left for a paused index"
+    assert AgentsFyiMiner::Ledger.load(instance.state).seen?(GEM_REPORT["id"])
+  end
+
+  def test_one_refused_vote_does_not_abort_the_cycle_or_lose_the_rest
+    # The failure this pins: `record` used to re-raise `CollectionPaused`, which threw away every
+    # other result in the batch and skipped the ledger save. The next cycle bought the same
+    # installs again, so an independent verifier could sit on one paused report for hours.
+    session = fake_session([REPORTED, GEM_REPORT])
+    session.after_submit = lambda do |report_id|
+      next unless report_id == REPORTED["id"]
+
+      raise AgentsFyiMiner::Errors::CollectionPaused.new("python is paused", ecosystem: "python")
+    end
+    instance = verifier_for(session)
+
+    stats = instance.one_cycle
+
+    voted = session.calls.select { |call| call[0] == :verify }.map { |call| call[1] }
+    assert_includes voted, GEM_REPORT["id"], "the other index's report is still voted on"
+    assert_equal 1, stats.paused
+    ledger = AgentsFyiMiner::Ledger.load(instance.state)
+    assert ledger.seen?(REPORTED["id"]), "the refused report stays due and is not recorded as failed"
+    assert_nil ledger.report(REPORTED["id"])
+    assert_equal AgentsFyiMiner::Ledger::REPRODUCED, ledger.report(GEM_REPORT["id"]).outcome
   end
 
   def test_a_report_the_corpus_no_longer_has_is_dropped_rather_than_read_forever

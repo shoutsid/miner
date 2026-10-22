@@ -38,8 +38,10 @@ module AgentsFyiMiner
   class Verifier
     # How many pages of the feed a cycle reads when it is only staying current. The
     # reconciliation walk on the first cycle is the long one, and it is bounded by
-    # `Feed::DEFAULT_PAGES`.
-    CATCHUP_PAGES = 20
+    # `Feed::DEFAULT_PAGES`; this one has to catch up after a pause or an outage without
+    # turning every cycle into a full reconciliation, so it is 8,000 rows at the page size the
+    # feed serves.
+    CATCHUP_PAGES = 40
 
     # How long an idle cycle waits before looking again, which is *not* the miner's ten minutes
     # and that is the point.
@@ -54,7 +56,8 @@ module AgentsFyiMiner
 
     # What one cycle confirmed, which is also what its log line says.
     class Stats
-      attr_accessor :checked, :reproduced, :partial, :dissent, :no_claim, :skipped, :notes
+      attr_accessor :checked, :reproduced, :partial, :dissent, :no_claim, :skipped, :paused,
+        :notes
 
       def initialize
         @checked = 0
@@ -63,6 +66,10 @@ module AgentsFyiMiner
         @dissent = 0
         @no_claim = 0
         @skipped = 0
+        # Reports left in the backlog because their index is not collecting. They are not skipped
+        # work — the report is good and the corpus is not taking a vote — so they get their own
+        # number rather than inflating `skipped`, which means the release could not be built.
+        @paused = 0
         @notes = []
       end
 
@@ -70,15 +77,22 @@ module AgentsFyiMiner
       # looking found. `checked` is first because it is the number that says whether the cycle
       # as a whole reached anything.
       def summary
-        "#{@checked} report(s) checked: #{@reproduced} reproduced, #{@partial} partial, " \
+        line = "#{@checked} report(s) checked: #{@reproduced} reproduced, #{@partial} partial, " \
           "#{@dissent} dissented, #{@no_claim} not checkable, #{@skipped} skipped"
+        @paused.positive? ? "#{line}, #{@paused} left for a paused index" : line
       end
     end
 
     # One verifying operator, working continuously against one corpus.
+    #
+    # `ecosystems` is the scope this operator works. It is not a filter on what it reads but on
+    # what it *checks*: a deployment that has turned an index off should not have a verifier
+    # installing two releases per report to discover that every vote is refused. Reports outside
+    # the scope are dropped from this operator's backlog — a restart's reconciliation walk re-adds
+    # them if the scope widens — and those inside it are checked as before.
     def initialize(session:, home:, state:, role:, ledger:, budget: 6,
                    workers: Service::DEFAULT_WORKERS, dry_run: false, heartbeat: nil,
-                   writes_per_hour: Service::WRITES_PER_HOUR)
+                   writes_per_hour: Service::WRITES_PER_HOUR, ecosystems: Ecosystems::ALL)
       unless Verifying::ROLES.include?(role)
         raise ArgumentError, "unknown verification role #{role.inspect}"
       end
@@ -90,7 +104,13 @@ module AgentsFyiMiner
       @ledger = ledger
       @budget = budget
       @workers = [workers, 1].max
+      @ecosystems = ecosystems.nil? ? Ecosystems::ALL : Array(ecosystems)
       @dry_run = dry_run
+      # Whether each index is collecting, asked once per cycle rather than once per report. Empty
+      # at the start of every cycle because a pause is a decision an operator can lift at any
+      # moment, and a cached "paused" that outlives the decision is a verifier that never works
+      # again.
+      @paused = {}
       # Touched at the end of every cycle, for the same reason the miner's is: the process being
       # up says nothing about whether it is still working.
       @heartbeat = heartbeat.nil? ? nil : Pathname.new(heartbeat)
@@ -116,7 +136,7 @@ module AgentsFyiMiner
     end
 
     attr_reader :session, :home, :state, :role, :ledger, :budget, :workers, :dry_run, :heartbeat,
-      :writes
+      :writes, :ecosystems
     attr_accessor :stop
 
     def logger = Log.logger("agents_fyi_miner.verifier")
@@ -144,11 +164,10 @@ module AgentsFyiMiner
           logger.warning("write quota spent; waiting %.0fs (%s)", wait_for, e.message)
           total.notes << format("rate limited, waited %.0fs", wait_for)
         rescue Errors::CollectionPaused => e
-          # This verifier learns about a pause later than the miner does, and from a different
-          # place: its work list is its own ledger of report ids, and an id carries no index — the
-          # report does, when it is read. So it finds out when its first vote is refused, waits,
-          # and finds out again. The alternative is a second request per cycle to ask which indexes
-          # are open, which is a request spent to learn something the refusal already says.
+          # A pause is normally learned before the work is admitted (`Verifier#paused?`), and a
+          # refusal that races it is handled per report in `record`. This remains for a pause
+          # raised on a read path, where there is no report to leave in the backlog: wait the
+          # interval the service named rather than spinning, then ask again.
           wait_for = [e.retry_after, 1.0].max
           logger.info("collection paused; waiting %.0fs (%s)", wait_for, e.message)
           total.notes << "collection paused: #{e.message}"
@@ -198,6 +217,10 @@ module AgentsFyiMiner
     # Read the corpus, check what nobody has confirmed, and vote.
     def one_cycle
       stats = Stats.new
+      # A pause can be lifted at any moment, so the answer is not carried between cycles: the
+      # question is one cheap read per index that has work, and a stale "paused" is a verifier
+      # that has stopped for a reason that no longer holds.
+      @paused = {}
       if @operator_id.nil?
         mine = @session.me
         @operator_id = mine.fetch("id", "").to_s
@@ -279,9 +302,31 @@ module AgentsFyiMiner
       waiting = 0
       unbuildable = 0
       settled = 0
+      out_of_scope = 0
+      paused = 0
       now = Time.now.to_f
       Feed.both_ends(@ledger.unresolved_seen).each do |report_id|
         break if work.length >= @budget || inspected >= @budget * 4
+
+        # The feed already said which index this report belongs to, so a verifier working one
+        # index can pass over the other's reports without a body read — and, the half that
+        # mattered, without spending a look on them. The as-reported verifier on this deployment
+        # had 155 Python reports ahead of 159 Ruby ones on an index that was paused, so every
+        # look it spent reaching Ruby was a look an open report did not get.
+        ecosystem = @ledger.ecosystem_of(report_id)
+        if !ecosystem.empty? && !in_scope?(ecosystem)
+          @ledger.drop_seen(report_id)
+          out_of_scope += 1
+          next
+        end
+        # An index that is not collecting will refuse the vote, so the installs that produce one
+        # are wasted work. Asked before the report is read, because the answer is about the index
+        # and not about this report — and kept in the backlog, because a pause is a decision that
+        # can be lifted, unlike a report whose release this machine cannot build.
+        if paused?(ecosystem)
+          paused += 1
+          next
+        end
 
         # Before the lookup, and not counted against the cap: a check that failed wrote a retry
         # time, and a report this operator is not going to run this cycle should not cost a
@@ -332,6 +377,19 @@ module AgentsFyiMiner
           @ledger.drop_seen(report_id)
           next
         end
+        # A ledger written before the feed carried the ecosystem has no answer, so the body above
+        # was the only way to learn it. Record it now — the next cycle passes over this report
+        # without a request — and apply the same two rules the known case did.
+        @ledger.note_seen(report_id, ecosystem: claim.ecosystem)
+        unless in_scope?(claim.ecosystem)
+          @ledger.drop_seen(report_id)
+          out_of_scope += 1
+          next
+        end
+        if paused?(claim.ecosystem)
+          paused += 1
+          next
+        end
         # A release this machine has already established it cannot produce. The fact is the
         # release's, so the second report about it costs nothing: it is settled here rather than
         # paying for the install again — and, at the twenty-fourth, rather than paying for it
@@ -358,7 +416,37 @@ module AgentsFyiMiner
       if settled.positive?
         stats.notes << "#{settled} report(s) already settled; passed over without a request"
       end
+      if out_of_scope.positive?
+        stats.notes << "#{out_of_scope} report(s) belong to an index this verifier does not work"
+      end
+      if paused.positive?
+        stats.notes << "#{paused} report(s) belong to a paused index; left for when it resumes"
+      end
+      stats.paused += paused
       work
+    end
+
+    # Whether this operator works reports from that index.
+    def in_scope?(ecosystem)
+      @ecosystems.any? { |candidate| candidate.name == ecosystem.to_s }
+    end
+
+    # Whether that index is collecting, asked at most once per cycle.
+    #
+    # A failed probe reads as collecting rather than paused: the report read that follows is the
+    # real question, and treating an outage as a pause would stop every verifier on a service
+    # that was merely unreachable. A refused vote then sets the answer for this cycle, so one
+    # pause does not turn into twenty-three refusals.
+    def paused?(ecosystem)
+      return false if ecosystem.to_s.empty?
+      return @paused[ecosystem] if @paused.key?(ecosystem)
+
+      @paused[ecosystem] = begin
+        @session.collection_paused?(ecosystem)
+      rescue Errors::CorpusError => e
+        logger.warning("could not ask whether %s is collecting: %s", ecosystem, e.message)
+        false
+      end
     end
 
     # --- checking ------------------------------------------------------------
@@ -530,6 +618,13 @@ module AgentsFyiMiner
     # Write down what one check decided, and vote if it decided anything.
     def record(report, claim, verdict, error, stats)
       report_id = report["id"].to_s
+      # The first refused vote in a batch sets this, so the rest are left for when the index
+      # resumes rather than each paying for a request that will be refused the same way.
+      if paused?(claim.ecosystem)
+        stats.paused += 1
+        logger.info("%s left for a paused %s index", report_id, claim.ecosystem)
+        return
+      end
       if verdict.nil?
         # A release that could not be installed or imported is not evidence about the report:
         # recorded as failed, so it is tried again rather than settled by an outage. Unless the
@@ -596,11 +691,18 @@ module AgentsFyiMiner
         # Nothing was written, so the report stays due and the loop waits the quota out; marking it
         # failed here would retry it in six hours.
         raise
-      rescue Errors::CollectionPaused
-        # The same reasoning as the quota above and one more: the handler below records a verdict
-        # about this report, and a pause is not a verdict about a report. Written from here, the
-        # retry it schedules would outlast a pause that lifts in minutes.
-        raise
+      rescue Errors::CollectionPaused => e
+        # A pause is a decision about the corpus and not a verdict about this report, so it writes
+        # no record: the report stays due and is checked again when the index resumes. It also no
+        # longer re-raises: an abort here discarded every other result in the batch — and on this
+        # deployment the batch was twenty-four installs — while the ledger was never saved, so the
+        # next cycle bought the same twenty-four again. That is how an independent verifier sat on
+        # one paused Python report for hours and looked healthy from its heartbeat.
+        @paused[claim.ecosystem] = true
+        stats.paused += 1
+        logger.info("collection paused for %s; leaving %s for when it resumes (%s)",
+          claim.ecosystem, report_id, e.message)
+        return
       rescue Errors::CorpusError => e
         @ledger.record_report(report_id, outcome: Ledger::FAILED,
           next_at: Time.now.to_f + Service::REPORT_RETRY_SECONDS,

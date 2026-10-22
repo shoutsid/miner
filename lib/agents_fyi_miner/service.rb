@@ -86,10 +86,12 @@ module AgentsFyiMiner
     WRITE_WINDOW_SECONDS = 3600
 
     # How much of the corpus the once-per-process reconciliation walk reads. Bounded because it is
-    # somebody else's corpus and its size is not this service's to decide: 5000 reports is a few
-    # dozen reads against a quota of 600 a minute, and past that the backlog is "the most recent few
-    # thousand reports", which is stated here rather than discovered by a walk that never returns.
-    RECONCILE_PAGES = 50
+    # somebody else's corpus and its size is not this service's to decide: 20,000 reports at the
+    # 200 a page the feed serves is a few dozen reads against a quota of 600 a minute, and past
+    # that the backlog is "the most recent many thousand reports", which is stated here rather
+    # than discovered by a walk that never returns. It is a few times the corpus this deployment
+    # holds, so a reconciliation reaches the reports it exists to pick up.
+    RECONCILE_PAGES = 100
 
     # How many releases one facts write carries. The service takes at most 500 per request
     # (`releases.MAX_FACTS_PER_REQUEST`, which the discovery document also states) and refuses a

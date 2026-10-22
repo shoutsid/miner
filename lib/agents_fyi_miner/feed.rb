@@ -17,10 +17,12 @@ module AgentsFyiMiner
   # describes points past a row the work never reached.
   module Feed
     # How many pages one walk reads before giving up on the rest of the corpus. The service reads
-    # somebody else's corpus, whose size is not its to decide: 50 pages is 5000 reports, a few dozen
-    # reads against a quota of 600 a minute, and past that "the most recent few thousand reports" is
-    # a stated bound rather than a walk that never returns.
-    DEFAULT_PAGES = 50
+    # somebody else's corpus, whose size is not its to decide: 100 pages is 20,000 reports at the
+    # 200 a page the route serves, a few dozen reads against a quota of 600 a minute, and past
+    # that "the most recent many thousand reports" is a stated bound rather than a walk that never
+    # returns. It is a few times the corpus this deployment holds, so a reconciliation reaches the
+    # end rather than stopping just short.
+    DEFAULT_PAGES = 100
 
     # A backlog's order, oldest and newest alternately.
     #
@@ -62,16 +64,19 @@ module AgentsFyiMiner
     def self.walk(session, ledger, since:, since_id:, pages: DEFAULT_PAGES, advance: true)
       seen = 0
       pages.times do
-        page = session.changes(since: since, since_id: since_id, limit: 100)
+        # 200 is the route's own `LIMIT_MAX`, so one request answers what two used to.
+        page = session.changes(since: since, since_id: since_id, limit: 200)
         page.fetch("items", []).each do |report|
           # Hidden reports are named because a syncing client has to learn that something was
           # retracted. Neither reader can act on one, so it is counted and skipped rather than
           # filed — and *not* counted as seen, which is what the `next` before the counter means.
           next if report["hidden"]
 
-          # The status travels with the id because the feed already carries it and a reader would
-          # otherwise fetch the body to learn it — see `Ledger#note_seen` for what that cost.
-          ledger.note_seen(report["id"].to_s, status: (report["status"] || "").to_s)
+          # The status and the ecosystem travel with the id because the feed already carries both
+          # and a reader would otherwise fetch the body to learn either — see `Ledger#note_seen`
+          # for what that cost, and for why a verifier scoped to one index needs the second.
+          ledger.note_seen(report["id"].to_s, status: (report["status"] || "").to_s,
+            ecosystem: (report["ecosystem"] || "").to_s)
           seen += 1
         end
         # Taken from every page, including the last one, because it is the service's own position of

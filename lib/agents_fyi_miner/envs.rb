@@ -33,11 +33,12 @@ module AgentsFyiMiner
     #
     # It is a floor rather than the whole story now. What an install actually gets is
     # `install_deadline`, which prices the bytes it has to move — because a flat ceiling cannot
-    # serve both ends of the watchlist: five minutes is generous for the hundreds of small
+    # serve both ends of the watchlist: ten minutes is generous for the hundreds of small
     # packages that make up most of the queue and hopeless for the machine-learning tail, where
-    # one wheel is 688 MB.
-    INSTALL_TIMEOUT = 300
-    RUN_TIMEOUT = 60
+    # one wheel is 688 MB. The floor is deliberately generous, because a cap that turns a slow
+    # success into a recorded failure is not a bound on cost.
+    INSTALL_TIMEOUT = 600
+    RUN_TIMEOUT = 120
 
     # The most any one install may be given, however large its payload.
     #
@@ -46,7 +47,7 @@ module AgentsFyiMiner
     # the caller that reaches it, instead of being attempted for ever. The value is a compromise
     # between two real costs — long enough to deliver a gigabyte at the rate this deployment
     # measured, short enough that a stuck install does not hold a worker for most of a cycle.
-    MAX_INSTALL_TIMEOUT = 2400
+    MAX_INSTALL_TIMEOUT = 4800
 
     # What a retry multiplies its deadline by.
     #
@@ -99,8 +100,10 @@ module AgentsFyiMiner
     # not "one venv" — it reached 26 GB within an hour of the wider watchlist, most of it a
     # handful of machine-learning packages. Nothing here is a record: an environment is how a
     # finding is derived, and a finding that has been filed does not need it again. So they are a
-    # cache with a budget, and the least recently used go first.
-    ENV_BUDGET_BYTES = 8 * (1024**3)
+    # cache with a budget, and the least recently used go first. The bound protects a physical
+    # resource, so it is measured in that resource's own unit (see `Envs.prune`, which sums
+    # `st_blocks * 512`).
+    ENV_BUDGET_BYTES = 16 * (1024**3)
 
     # How long an environment is left alone regardless of the budget.
     #

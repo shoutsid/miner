@@ -31,20 +31,20 @@ class DeadlineTest < MinerTest
   end
 
   def test_a_large_payload_gets_longer_than_the_floor
-    # 500 MB at a megabyte a second is a little over eight minutes, not five.
-    assert_equal((500 * MB) / 1_000_000,
-      E.install_deadline(500 * MB, rate: 1_000_000.0, workers: 1))
+    # 800 MB at a megabyte a second is a little over thirteen minutes, not ten.
+    assert_equal((800 * MB) / 1_000_000,
+      E.install_deadline(800 * MB, rate: 1_000_000.0, workers: 1))
   end
 
   def test_the_link_is_divided_among_the_workers_sharing_it
     # Six workers on a six-megabyte link each get one, which is the whole problem.
-    shared = E.install_deadline(500 * MB, rate: 6_000_000.0, workers: 6)
-    alone = E.install_deadline(500 * MB, rate: 1_000_000.0, workers: 1)
+    shared = E.install_deadline(800 * MB, rate: 6_000_000.0, workers: 6)
+    alone = E.install_deadline(800 * MB, rate: 1_000_000.0, workers: 1)
 
     assert_equal alone, shared
     # And the same release on the same link with nobody to share it with is quick enough that the
     # floor is what applies.
-    assert_equal E::INSTALL_TIMEOUT, E.install_deadline(500 * MB, rate: 6_000_000.0, workers: 1)
+    assert_equal E::INSTALL_TIMEOUT, E.install_deadline(800 * MB, rate: 6_000_000.0, workers: 1)
   end
 
   def test_an_unmeasured_link_is_treated_as_slow_rather_than_fast
