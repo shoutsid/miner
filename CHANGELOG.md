@@ -14,6 +14,11 @@ its image and its command line.
 
 ### Added
 
+- The verifier checks a Rails move that failed while Bundler was resolving versions:
+  `as-reported` executes a minimal `bundle lock` naming the two releases, and `searched`
+  reads the refused gem's own gemspec rather than the report's quoted constraint. Both use
+  the two existing verifier accounts, so such a report can reach `resolved_verified` without
+  the application that filed it.
 - `--version`, so an issue can name the client build without reading the source.
 - Standalone documentation, issue and pull-request templates, and a contract split: the
   service owns the `change_kind` vocabulary, the frozen `Gem::Version` recording and the

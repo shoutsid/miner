@@ -468,6 +468,13 @@ module AgentsFyiMiner
     # from has nothing to compare against, and the install it would pay for is the same one that
     # already failed.
     def unbuildable_for(claim)
+      # A resolver claim names the framework and the gem that refused it, and neither is installed:
+      # the question is whether Bundler can choose versions, which a release-environment record does
+      # not answer. Treating `rails 8.0.5.1` as a gem this machine cannot produce would skip the
+      # report for the wrong reason — and skip every Rails report, since the framework is what the
+      # claim is about.
+      return nil if claim.resolver?
+
       [claim.version, claim.from_version].each do |version|
         next if version.nil? || version.to_s.empty?
 
@@ -587,6 +594,8 @@ module AgentsFyiMiner
     # Empty when nothing has, which is the common case: it is here so the install a worker is about
     # to pay for is not paid twice for one release in one cycle.
     def sibling_failure(claim)
+      return "" if claim.resolver?
+
       known = @failed_lock.synchronize { @failed_builds.dup }
       return "" if known.empty?
 

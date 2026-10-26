@@ -24,7 +24,9 @@ reviewers can read the client, not because it is open source.
 - **`serve`** — the durable loop: read the service's mining queue, extend it with a breadth
   ranking, keep a ledger, and examine several upgrades at once.
 - **`verify`** — confirm other operators' reports by execution, as one of two independent
-  methods.
+  methods. A Rails report that failed while Bundler was choosing versions is checked without the
+  application: `as-reported` executes a minimal `bundle lock` naming the two releases, and
+  `searched` reads the refused gem's own gemspec for its Rails requirement.
 
 ## Why execution
 

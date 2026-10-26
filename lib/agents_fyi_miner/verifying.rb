@@ -5,6 +5,7 @@ require_relative "errors"
 require_relative "ledger"
 require_relative "mine"
 require_relative "reporting"
+require_relative "resolver"
 require_relative "rubyenvs"
 require_relative "solving"
 
@@ -135,11 +136,12 @@ module AgentsFyiMiner
 
     # What a report says, in the form an execution can test.
     #
-    # `parameter` and `symbol` are the two shapes a mined report has — an argument a call site
-    # passed, or a name an import referred to — and exactly one of them is set. Everything else is
-    # evidence about that one thing: where the report says the failure is (`sites`, `module_name`),
-    # where the fix says the name went (`moved`), what the fix says to call instead (`replacement`),
-    # and the release the report says it came from (`from_version`).
+    # `parameter` and `symbol` are the two *probe* shapes a mined report has — an argument a call
+    # site passed, or a name an import referred to — and exactly one of them is set. Everything
+    # else is evidence about that one thing: where the report says the failure is (`sites`,
+    # `module_name`), where the fix says the name went (`moved`), what the fix says to call instead
+    # (`replacement`), and the release the report says it came from (`from_version`). A resolver
+    # claim sets neither: it is about two releases, not a call in one.
     #
     # `ecosystem` says which index the two releases belong to, because everything below it
     # differs: a gem is installed with `gem` and reached with `require`, its name is a
@@ -152,19 +154,35 @@ module AgentsFyiMiner
     #
     # `Data` gives the value equality the frozen dataclass had, and `of` is where the defaults
     # live.
+    # **A resolver claim is the third shape, and it is not a reference at all.** A Rails move can
+    # fail while Bundler is choosing versions, before an application is installed or booted; the
+    # thing the report is about is two releases that cannot sit together. `resolver_gem` and its
+    # version are the one the report says was refused, and `version` is the Rails release it was
+    # refused beside. All three are empty on every other claim, which is why `resolver?` is the
+    # branch every reader asks first.
     Claim = Data.define(:library, :version, :parameter, :symbol, :module_name, :sites,
       :replacement, :moved, :from_version, :ecosystem, :reference,
-      :reference_kind) do
+      :reference_kind, :resolver_gem, :resolver_version, :resolver_requirement) do
       def self.of(library:, version:, parameter: "", symbol: "", module_name: "", sites: [],
                   replacement: "", moved: "", from_version: "", ecosystem: "python",
-                  reference: "", reference_kind: "")
+                  reference: "", reference_kind: "", resolver_gem: "", resolver_version: "",
+                  resolver_requirement: "")
         new(library: library, version: version, parameter: parameter.to_s, symbol: symbol.to_s,
           module_name: module_name.to_s, sites: Array(sites).freeze, replacement: replacement.to_s,
           moved: moved.to_s, from_version: from_version.to_s, ecosystem: ecosystem,
-          reference: reference.to_s, reference_kind: reference_kind.to_s)
+          reference: reference.to_s, reference_kind: reference_kind.to_s,
+          resolver_gem: resolver_gem.to_s, resolver_version: resolver_version.to_s,
+          resolver_requirement: resolver_requirement.to_s)
       end
 
-      def kind = parameter.to_s.empty? ? "symbol" : "argument"
+      # Whether this is the resolver shape rather than a call site or a reference.
+      def resolver? = !resolver_gem.to_s.empty?
+
+      def kind
+        return "resolver" if resolver?
+
+        parameter.to_s.empty? ? "symbol" : "argument"
+      end
 
       # Whether this claim is about a gem rather than a package.
       def is_ruby? = ecosystem == "ruby"
@@ -173,7 +191,11 @@ module AgentsFyiMiner
       def leaf = RubyEnvs.leaf_of(reference)
 
       # The thing the release supposedly took away, as the title spells it.
-      def subject = parameter.to_s.empty? ? symbol : parameter
+      def subject
+        return "#{resolver_gem} #{resolver_version}" if resolver?
+
+        parameter.to_s.empty? ? symbol : parameter
+      end
 
       # The reference the report quoted the interpreter raising about.
       def dotted
@@ -217,6 +239,20 @@ module AgentsFyiMiner
     # about either, and a confirmation of the wrong one is a true sentence about a different
     # question.
     def self.claim_for(report)
+      # **The resolver shape is read before the subject-kind guard, because it is not a package
+      # claim.** A Rails move's failure is filed as `platform` — the thing that broke is the move,
+      # not the gem — and the old guard refused every one of them before reading the output that
+      # names the two releases. The claim is still narrow: `Resolver.claim_for` needs Bundler's own
+      # `Because … depends on rails …` sentence and a Rails pin, or it returns nothing.
+      if field(report, "ecosystem").to_s == "ruby"
+        target = Resolver.claim_for(report)
+        unless target.nil?
+          return Claim.of(library: "rails", version: target.rails_version, ecosystem: "ruby",
+            resolver_gem: target.gem, resolver_version: target.gem_version,
+            resolver_requirement: target.requirement)
+        end
+      end
+
       return nil unless field(report, "subject_kind", "package").to_s == "package"
 
       library = field(report, "library").to_s.strip
@@ -285,6 +321,12 @@ module AgentsFyiMiner
     # installed, which is the caller's answer to give: a release that will not build is not
     # evidence about a report.
     def self.check(claim, role, build:, suffix: "")
+      # **A resolver claim is checked by the resolver, not by a release environment.** It is about
+      # two versions rather than about code inside one, so a `build` of either release would be the
+      # wrong tool — and the gem the report says was refused is not the report's library, so the
+      # ledger's unbuildable-release rule must not see it as one.
+      return Resolver.check(claim, role, suffix: suffix) if claim.resolver?
+
       if claim.is_ruby?
         # A gem's claim is a reference to run, in both roles — there is no call-site analysis to
         # do, because the Ruby client never files an argument claim.
@@ -304,6 +346,25 @@ module AgentsFyiMiner
     # with no way to see what they ran is a fact about arithmetic rather than about the release.
     # `notes` carries the execution itself.
     def self.payload(verdict, claim, role)
+      if claim.resolver?
+        releases = "rails #{claim.version} with #{claim.resolver_gem} #{claim.resolver_version}"
+        how = if role == AS_REPORTED
+          "ran `bundle lock` against a minimal Gemfile naming #{releases}"
+        else
+          "read #{claim.resolver_gem} #{claim.resolver_version}'s gemspec from rubygems.org and " \
+            "evaluated its rails requirement against #{claim.version}"
+        end
+        return {
+          "outcome" => verdict.outcome,
+          "environment" => ("#{RubyEnvs.runtime}; #{how}, by an operator that did not file the " \
+                            "report (method: #{role})"),
+          # The service's field is bounded at 2,000 characters, and the conflict is at the head of
+          # the output rather than its tail. A refusal from validation would turn a real vote into
+          # a skipped report, so the evidence is clipped here rather than left to the service.
+          "notes" => verdict.executed.to_s[0, Resolver::NOTES_LIMIT].to_s
+        }
+      end
+
       releases = "#{claim.library} #{claim.version}"
       if !claim.from_version.empty? && claim.from_version != claim.version
         releases = "#{claim.library} #{claim.from_version} and #{claim.library} #{claim.version}"

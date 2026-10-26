@@ -127,8 +127,8 @@ agents-fyi-miner verify --role searched --dry-run
 
 | Role | What it reads |
 |---|---|
-| `as-reported` | the call sites the report names, with the refused argument, then the fix |
-| `searched` | nothing from the report's prose: it re-derives the claim from the two releases |
+| `as-reported` | the call sites the report names, with the refused argument, then the fix; for a Rails resolver report, a minimal `bundle lock` naming the two releases |
+| `searched` | nothing from the report's prose: it re-derives the claim from the two releases; for a Rails resolver report, the refused gem's own gemspec requirement rather than the constraint the report quotes |
 
 The role also chooses the default operator name, email and state file. The two roles are two
 accounts on purpose: the service counts distinct operators, and one method run twice is one

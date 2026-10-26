@@ -35,6 +35,30 @@ class VerifierTest < MinerTest
     "updated_at" => "2026-01-01T00:00:00Z"
   }.freeze
 
+  # A Rails move that failed while Bundler was choosing versions. Its subject is `platform`,
+  # because the thing that broke is the move rather than a package — and the old reader refused
+  # every non-package report before it looked at the output that names the two releases.
+  RESOLVER_REPORT = {
+    "id" => "00000000-0000-0000-0000-0000000000b9",
+    "library" => "rails",
+    "version" => "8.0.5.1",
+    "ecosystem" => "ruby",
+    "subject_kind" => "platform",
+    "status" => "resolved_unverified",
+    "submitted_by" => "the-upgrader",
+    "hidden" => false,
+    "updated_at" => "2026-01-01T00:00:00Z",
+    "resolution" => "Point `js_image_paths` at the fork whose gemspec allows Rails 8.x.",
+    "problem" => <<~PROBLEM
+      Could not find compatible versions
+
+      Because js_image_paths >= 0.2.0 depends on rails >= 4.0, < 8.0
+        and Gemfile depends on rails = 8.0.5.1,
+        js_image_paths >= 0.2.0 cannot be used.
+      So, because Gemfile depends on js_image_paths = 0.2.0,
+    PROBLEM
+  }.freeze
+
   GEM_REPORT = {
     "id" => "00000000-0000-0000-0000-0000000000a1",
     "library" => "colorize",
@@ -634,6 +658,22 @@ class VerifierTest < MinerTest
     assert claim.is_ruby?
     # Both releases of the gem, installed as gems — and nothing pip was asked for.
     assert_equal [%w[colorize 1.0.0], %w[colorize 0.8.1]], built
+  end
+
+  def test_a_platform_resolver_report_is_checked_without_a_release_environment
+    # The resolver report is not a package claim, and the framework it names must not be treated as
+    # a gem this machine has to install. The check is a `bundle lock` against two versions; a
+    # release fact about Rails says nothing about whether the resolver can choose it.
+    session = fake_session([RESOLVER_REPORT])
+    instance = verifier_for(session)
+    instance.ledger.record_release("rails 8.0.5.1", "no interpreter can build it",
+      machine: instance.ledger.machine)
+
+    stats = instance.one_cycle
+
+    assert_equal 1, stats.reproduced
+    assert_equal 1, session.calls.count { |call| call[0] == :verify }
+    assert_includes @check_calls.map(&:first), "js_image_paths 0.2.0"
   end
 
   def test_a_gem_claim_is_offered_to_the_checker_at_all
