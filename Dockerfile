@@ -24,7 +24,7 @@
 # than installed from apt, which is exactly how this file used to carry Ruby.
 #
 # Pinned by digest for the reason above.
-FROM python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9 AS python
+FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 AS python
 
 # Ruby is the client and the *base*, and the pin is a decision about which
 # interpreter its rules were verified against rather than about size. Debian
