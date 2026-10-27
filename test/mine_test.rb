@@ -13,11 +13,11 @@ require_relative "test_helper"
 class MineTest < MinerTest
   include StubHelper
 
-  M = AgentsFyiMiner::Mine
+  M = AgentsMiner::Mine
 
-  BEFORE = AgentsFyiMiner::Envs::Env.new(package: "numpy", version: "1.26.4",
+  BEFORE = AgentsMiner::Envs::Env.new(package: "numpy", version: "1.26.4",
     root: Pathname.new("/before"))
-  AFTER = AgentsFyiMiner::Envs::Env.new(package: "numpy", version: "2.0.0",
+  AFTER = AgentsMiner::Envs::Env.new(package: "numpy", version: "2.0.0",
     root: Pathname.new("/after"))
 
   # The two strings `envs.probe`/`probe_symbol` return when the release never got to answer for
@@ -38,7 +38,7 @@ class MineTest < MinerTest
     # `TypeError: findings_between() got an unexpected keyword argument 'suffix'` for every pair in
     # its first parallel cycle. A keyword that exists on the inner function and not on the one the
     # service calls is invisible to tests that call the inner one.
-    inventory = ->(_env, **_kwargs) { AgentsFyiMiner::Envs::Inventory.new(module: "numpy", entries: []) }
+    inventory = ->(_env, **_kwargs) { AgentsMiner::Envs::Inventory.new(module: "numpy", entries: []) }
 
     with_stub(M, :inventory_for, inventory) do
       assert_equal [], M.findings_between("numpy", "1.26.4", "2.0.0", BEFORE, AFTER, suffix: "-x")
@@ -54,7 +54,7 @@ class MineTest < MinerTest
     suffixes = []
     entries = lambda do |env, **_kwargs|
       params = env.version == "1.26.4" ? { "legacy" => { "required" => false } } : {}
-      AgentsFyiMiner::Envs::Inventory.new(
+      AgentsMiner::Envs::Inventory.new(
         module: "numpy", entries: [{ "name" => "obj", "kind" => "class", "params" => params }]
       )
     end
@@ -82,7 +82,7 @@ class MineTest < MinerTest
     seen = []
     entries = lambda do |env, **_kwargs|
       params = env.version == "1.26.4" ? { "typ" => { "required" => false } } : {}
-      AgentsFyiMiner::Envs::Inventory.new(
+      AgentsMiner::Envs::Inventory.new(
         module: "yaml",
         entries: [{ "name" => "safe_load", "kind" => "function", "params" => params }]
       )
@@ -339,7 +339,7 @@ class MineTest < MinerTest
   def signature_inventory(older:, newer:)
     lambda do |env, **_kwargs|
       names = env.version == BEFORE.version ? older : newer
-      AgentsFyiMiner::Envs::Inventory.new(
+      AgentsMiner::Envs::Inventory.new(
         module: "numpy",
         entries: [{ "name" => "obj", "kind" => "class",
                     "params" => names.sort.to_h { |name| [name, { "required" => false }] } }]
@@ -440,7 +440,7 @@ class MineTest < MinerTest
     # a signature nobody could read.
     entries = lambda do |env, **_kwargs|
       params = env.version == BEFORE.version ? nil : { "a" => { "required" => false } }
-      AgentsFyiMiner::Envs::Inventory.new(
+      AgentsMiner::Envs::Inventory.new(
         module: "numpy", entries: [{ "name" => "obj", "kind" => "class", "params" => params }]
       )
     end

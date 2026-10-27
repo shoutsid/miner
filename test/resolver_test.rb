@@ -12,8 +12,8 @@ require_relative "test_helper"
 class ResolverTest < MinerTest
   include StubHelper
 
-  V = AgentsFyiMiner::Verifying
-  R = AgentsFyiMiner::Resolver
+  V = AgentsMiner::Verifying
+  R = AgentsMiner::Resolver
 
   # The live report this verifier was written for, with its prose kept rather than tidied: the
   # `Because …` block is Bundler's own output, and a fixture that paraphrased it would not exercise
@@ -59,20 +59,20 @@ class ResolverTest < MinerTest
   OUTPUT
 
   def lock(status:, stdout: "", stderr: "")
-    with_stub(AgentsFyiMiner::Envs, :run_captured, lambda do |*_args, **_kwargs|
-      AgentsFyiMiner::Envs::Result.new(status: status, stdout: stdout, stderr: stderr)
+    with_stub(AgentsMiner::Envs, :run_captured, lambda do |*_args, **_kwargs|
+      AgentsMiner::Envs::Result.new(status: status, stdout: stdout, stderr: stderr)
     end) { yield }
   end
 
   def release(data)
-    with_stub(AgentsFyiMiner::Resolver, :fetch, lambda do |_target, suffix: ""|
+    with_stub(AgentsMiner::Resolver, :fetch, lambda do |_target, suffix: ""|
       _ = suffix
       [data, nil]
     end) { yield }
   end
 
   def unavailable(error)
-    with_stub(AgentsFyiMiner::Resolver, :fetch, lambda do |_target, suffix: ""|
+    with_stub(AgentsMiner::Resolver, :fetch, lambda do |_target, suffix: ""|
       _ = suffix
       [nil, error]
     end) { yield }
@@ -162,7 +162,7 @@ class ResolverTest < MinerTest
       V.check(claim, V::AS_REPORTED, build: ->(*) { flunk "a resolver claim must not build a release" })
     end
 
-    assert_equal AgentsFyiMiner::Ledger::REPRODUCED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::REPRODUCED, verdict.outcome
     assert_includes verdict.executed, "bundle lock"
     assert_includes verdict.executed, "js_image_paths"
     assert_includes verdict.executed, "Could not find compatible versions"
@@ -173,7 +173,7 @@ class ResolverTest < MinerTest
       V.check(claim, V::AS_REPORTED, build: ->(*) { flunk "a resolver claim must not build a release" })
     end
 
-    assert_equal AgentsFyiMiner::Ledger::DISSENTED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::DISSENTED, verdict.outcome
     assert_includes verdict.executed, "exit 0"
   end
 
@@ -191,8 +191,8 @@ class ResolverTest < MinerTest
   def test_a_machine_with_no_bundler_is_not_a_vote
     # `started: false` is a fact about the image, not about the two releases. Reporting it as a
     # timeout would send the operator to the index rather than to the verifier's PATH.
-    with_stub(AgentsFyiMiner::Envs, :run_captured, lambda do |*_args, **_kwargs|
-      raise AgentsFyiMiner::Envs::TimedOut.new("bundle lock", started: false)
+    with_stub(AgentsMiner::Envs, :run_captured, lambda do |*_args, **_kwargs|
+      raise AgentsMiner::Envs::TimedOut.new("bundle lock", started: false)
     end) do
       verdict = V.check(claim, V::AS_REPORTED, build: ->(*) {})
 
@@ -220,7 +220,7 @@ class ResolverTest < MinerTest
     ] } }
     verdict = release(data) { V.check(claim, V::SEARCHED, build: ->(*) {}) }
 
-    assert_equal AgentsFyiMiner::Ledger::REPRODUCED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::REPRODUCED, verdict.outcome
     assert_includes verdict.executed, ">= 4.0, < 8.0"
     assert_includes verdict.executed, "8.0.5.1"
     refute_includes verdict.executed, "bundle lock",
@@ -233,7 +233,7 @@ class ResolverTest < MinerTest
     ] } }
     verdict = release(data) { V.check(claim, V::SEARCHED, build: ->(*) {}) }
 
-    assert_equal AgentsFyiMiner::Ledger::DISSENTED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::DISSENTED, verdict.outcome
   end
 
   def test_a_release_with_no_rails_dependency_cannot_be_the_conflict
@@ -242,7 +242,7 @@ class ResolverTest < MinerTest
     ] } }
     verdict = release(data) { V.check(claim, V::SEARCHED, build: ->(*) {}) }
 
-    assert_equal AgentsFyiMiner::Ledger::DISSENTED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::DISSENTED, verdict.outcome
     assert_includes verdict.executed, "no runtime dependency on rails"
   end
 
@@ -261,7 +261,7 @@ class ResolverTest < MinerTest
     end
     payload = V.payload(verdict, claim, V::AS_REPORTED)
 
-    assert_equal AgentsFyiMiner::Ledger::REPRODUCED, payload["outcome"]
+    assert_equal AgentsMiner::Ledger::REPRODUCED, payload["outcome"]
     assert_includes payload["environment"], "bundle lock"
     assert_includes payload["environment"], "rails 8.0.5.1"
     assert_includes payload["environment"], "js_image_paths 0.2.0"

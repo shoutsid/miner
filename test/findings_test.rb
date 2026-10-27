@@ -12,8 +12,8 @@ require_relative "test_helper"
 # removal, `toml.InlineTableDict` filed as a removal. The comments say which, because a future
 # change that reads as a tidy-up is the change that re-files them.
 class FindingsTest < MinerTest
-  MECHANISM = AgentsFyiMiner::Mechanism
-  OBSERVATION = AgentsFyiMiner::Observation
+  MECHANISM = AgentsMiner::Mechanism
+  OBSERVATION = AgentsMiner::Observation
 
   def an_observation(**overrides)
     fields = {
@@ -166,7 +166,7 @@ class FindingsTest < MinerTest
     # It travels to the corpus as a request body, so it has to survive the trip.
     finding = summarise("httpx", "0.28.1", "0.27.2", [an_observation])
 
-    assert_kind_of AgentsFyiMiner::Finding, finding
+    assert_kind_of AgentsMiner::Finding, finding
     assert_equal "httpx", finding.to_h["library"]
   end
 
@@ -296,9 +296,9 @@ class FindingsTest < MinerTest
 
   private
 
-  def cluster(observations) = AgentsFyiMiner.cluster(observations)
+  def cluster(observations) = AgentsMiner.cluster(observations)
 
   def summarise(library, version, from_version, group, ecosystem: "python")
-    AgentsFyiMiner.summarise(library, version, from_version, group, ecosystem: ecosystem)
+    AgentsMiner.summarise(library, version, from_version, group, ecosystem: ecosystem)
   end
 end

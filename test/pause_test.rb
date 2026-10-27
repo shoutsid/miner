@@ -22,9 +22,9 @@ require_relative "test_helper"
 # Struct is used here rather than `Cli::Args` so this test does not depend on the flag
 # parser's own shape.
 class PauseTest < MinerTest
-  Cli = AgentsFyiMiner::Cli
-  Errors = AgentsFyiMiner::Errors
-  Ecosystems = AgentsFyiMiner::Ecosystems
+  Cli = AgentsMiner::Cli
+  Errors = AgentsMiner::Errors
+  Ecosystems = AgentsMiner::Ecosystems
 
   # The flags `workable` reads, so a test does not have to build the whole parser.
   def args_for(**overrides)
@@ -38,7 +38,7 @@ class PauseTest < MinerTest
 
     def mining_targets(limit:, pages:, ecosystem:)
       if @paused.include?(ecosystem.to_s)
-        raise AgentsFyiMiner::Errors::CollectionPaused.new(
+        raise AgentsMiner::Errors::CollectionPaused.new(
           "the #{ecosystem} queue is paused: Ruby is being brought up first.", ecosystem: ecosystem.to_s
         )
       end

@@ -14,7 +14,7 @@ require_relative "test_helper"
 # (a command whose exit becomes an error) — and `with_stub` is this suite's spelling of the
 # monkeypatch, because a stubbed module method has to be put back whatever the test does.
 class EnvsTest < MinerTest
-  E = AgentsFyiMiner::Envs
+  E = AgentsMiner::Envs
 
   REFUSAL = (
     "Traceback (most recent call last):\n  " \
@@ -323,19 +323,19 @@ class EnvsTest < MinerTest
       site = install_root(argv) + "lib" + "python3.12" + "site-packages"
       FileUtils.mkdir_p(site)
       FileUtils.mkdir_p(site + "numpy-2.5.3.dist-info")
-      raise AgentsFyiMiner::Errors::MinerError.new("timed out trying to install pkg==1.0")
+      raise AgentsMiner::Errors::MinerError.new("timed out trying to install pkg==1.0")
     end
     E::LOCKS.clear
 
     with_stub(E, :checked, fails) do
-      assert_raises(AgentsFyiMiner::Errors::MinerError) { E.build("pkg", "1.0", home: @home) }
+      assert_raises(AgentsMiner::Errors::MinerError) { E.build("pkg", "1.0", home: @home) }
     end
     refute (@home + "pkg-1.0").exist?
     refute E.installed?(@home + "pkg-1.0")
 
     # And the retry starts from a clean directory rather than the wreckage.
     with_stub(E, :checked, fails) do
-      assert_raises(AgentsFyiMiner::Errors::MinerError) { E.build("pkg", "1.0", home: @home) }
+      assert_raises(AgentsMiner::Errors::MinerError) { E.build("pkg", "1.0", home: @home) }
     end
     assert_equal 2, attempts.count("venv for pkg 1.0")
   end
@@ -350,7 +350,7 @@ class EnvsTest < MinerTest
     end
 
     caught = with_stub(E, :run_captured, failing) do
-      assert_raises(AgentsFyiMiner::Errors::MinerError) { E.build("wrapt", "1.13.3", home: @home) }
+      assert_raises(AgentsMiner::Errors::MinerError) { E.build("wrapt", "1.13.3", home: @home) }
     end
 
     assert caught.permanent?
@@ -391,7 +391,7 @@ class EnvsTest < MinerTest
     end
 
     caught = with_stub(E, :run_captured, timing_out) do
-      assert_raises(AgentsFyiMiner::Errors::MinerError) { E.build("pkg", "1.0", home: @home) }
+      assert_raises(AgentsMiner::Errors::MinerError) { E.build("pkg", "1.0", home: @home) }
     end
 
     refute caught.permanent?
@@ -459,7 +459,7 @@ class EnvsTest < MinerTest
     caught = with_stub(E, :checked, installed_env) do
       with_stub(E, :run_captured, failing) do
         env = E.build("kombu", "4.1.0", home: @home)
-        assert_raises(AgentsFyiMiner::Errors::MinerError) { E.inventory(env) }
+        assert_raises(AgentsMiner::Errors::MinerError) { E.inventory(env) }
       end
     end
 
@@ -554,7 +554,7 @@ class EnvsTest < MinerTest
     end
 
     caught = with_stub(E, :run_captured, killed) do
-      assert_raises(AgentsFyiMiner::Errors::MinerError) do
+      assert_raises(AgentsMiner::Errors::MinerError) do
         E.checked(["pip", "install", "kombu==4.1.0"], what: "install kombu 4.1.0")
       end
     end
@@ -574,7 +574,7 @@ class EnvsTest < MinerTest
     FileUtils.mkdir_p(env.root)
 
     caught = with_stub(E, :run_captured, killed) do
-      assert_raises(AgentsFyiMiner::Errors::MinerError) { E.inventory(env) }
+      assert_raises(AgentsMiner::Errors::MinerError) { E.inventory(env) }
     end
 
     refute caught.permanent?

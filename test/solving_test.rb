@@ -9,11 +9,11 @@ require_relative "test_helper"
 # → `proxy` (the rename whose *resolution text* is the thing being matched against, in every
 # spelling an operator might have written it).
 class SolvingTest < MinerTest
-  S = AgentsFyiMiner::Solving
-  MECHANISM = AgentsFyiMiner::Mechanism
+  S = AgentsMiner::Solving
+  MECHANISM = AgentsMiner::Mechanism
 
   HISTORY = %w[1.4.0 1.4.54 2.0.0 2.0.5 2.0.54].freeze
-  PAIR = AgentsFyiMiner::Pair.of(package: "sqlalchemy", from_version: "1.4.54",
+  PAIR = AgentsMiner::Pair.of(package: "sqlalchemy", from_version: "1.4.54",
     to_version: "2.0.54")
 
   # A report as the corpus serves one. String keys, because that is what a JSON body is and
@@ -35,7 +35,7 @@ class SolvingTest < MinerTest
   end
 
   def removed(parameter = "convert_unicode")
-    AgentsFyiMiner::Finding.new(
+    AgentsMiner::Finding.new(
       library: "sqlalchemy",
       version: "2.0.54",
       mechanism: MECHANISM::PARAMETER_REMOVED,
@@ -49,7 +49,7 @@ class SolvingTest < MinerTest
   end
 
   def renamed(parameter = "proxies", replacement = "proxy")
-    AgentsFyiMiner::Finding.new(
+    AgentsMiner::Finding.new(
       library: "httpx",
       version: "0.28.1",
       mechanism: MECHANISM::PARAMETER_RENAMED,
@@ -149,7 +149,7 @@ class SolvingTest < MinerTest
         status: "resolved_unverified"
       ),
       renamed,
-      AgentsFyiMiner::Pair.of(package: "httpx", from_version: "0.27.2", to_version: "0.28.1")
+      AgentsMiner::Pair.of(package: "httpx", from_version: "0.27.2", to_version: "0.28.1")
     )
 
     refute_nil answer
@@ -170,7 +170,7 @@ class SolvingTest < MinerTest
         status: "resolved_unverified"
       ),
       renamed,
-      AgentsFyiMiner::Pair.of(package: "httpx", from_version: "0.27.2", to_version: "0.28.1")
+      AgentsMiner::Pair.of(package: "httpx", from_version: "0.27.2", to_version: "0.28.1")
     )
 
     assert_nil answer

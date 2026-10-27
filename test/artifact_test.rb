@@ -16,7 +16,7 @@ class ArtifactTest < MinerTest
   ROOT = File.expand_path("..", __dir__)
   DOCKERFILE_PATH = File.join(ROOT, "Dockerfile")
   ENTRYPOINT_PATH = File.join(ROOT, "entrypoint.sh")
-  BIN_PATH = File.join(ROOT, "bin", "agents-fyi-miner")
+  BIN_PATH = File.join(ROOT, "bin", "agents-miner")
 
   def dockerfile
     @dockerfile ||= File.read(DOCKERFILE_PATH, encoding: "utf-8").gsub(/\\\n\s*/, " ")
@@ -61,9 +61,9 @@ class ArtifactTest < MinerTest
     assert_includes instructions, "COPY lib ./lib"
     assert_includes instructions, "COPY bin ./bin"
     assert_includes instructions, "COPY entrypoint.sh ./entrypoint.sh"
-    assert_includes entrypoint, "exec ruby /app/bin/agents-fyi-miner serve"
-    assert_includes entrypoint, "exec ruby /app/bin/agents-fyi-miner verify"
-    refute_includes entrypoint, "python -m agents_fyi_miner"
+    assert_includes entrypoint, "exec ruby /app/bin/agents-miner serve"
+    assert_includes entrypoint, "exec ruby /app/bin/agents-miner verify"
+    refute_includes entrypoint, "python -m agents_miner"
   end
 
   def test_the_image_carries_the_compiler_a_native_gem_needs
@@ -86,14 +86,14 @@ class ArtifactTest < MinerTest
     script = healthcheck[/CMD ruby -e "(.*)"\s*\z/, 1]
     refute_nil script, "the healthcheck does not run a Ruby one-liner"
 
-    assert_includes script, "/home/miner/.cache/agents-fyi-miner/heartbeat"
+    assert_includes script, "/home/miner/.cache/agents-miner/heartbeat"
     _out, err, status = Open3.capture3("ruby", "-e", script)
     refute_includes err, "syntax error", "the healthcheck does not compile: #{err}"
     assert_equal 1, status.exitstatus, "a missing heartbeat must be an unhealthy result, not a pass"
   end
 
   def test_every_flag_the_entrypoint_passes_is_one_the_cli_accepts
-    invocations = entrypoint.scan(/exec ruby \/app\/bin\/agents-fyi-miner (?:serve|verify).*?(?=\n|$)/m)
+    invocations = entrypoint.scan(/exec ruby \/app\/bin\/agents-miner (?:serve|verify).*?(?=\n|$)/m)
     refute_empty invocations, "the entrypoint does not start the CLI"
     flags = invocations.flat_map { |line| line.scan(/--[a-z][a-z-]*/) }.uniq
 
@@ -110,7 +110,7 @@ class ArtifactTest < MinerTest
     # report only to learn that every vote is refused, so both invocations name the scope
     # and the image's fallback is the index this deployment actually works.
     invocations = entrypoint.scan(
-      /exec ruby \/app\/bin\/agents-fyi-miner (?:serve|verify)(?:[^\n]*\\\n)*[^\n]*/
+      /exec ruby \/app\/bin\/agents-miner (?:serve|verify)(?:[^\n]*\\\n)*[^\n]*/
     )
     assert_equal 2, invocations.length, "the entrypoint does not start both modes"
     invocations.each do |line|
@@ -120,7 +120,7 @@ class ArtifactTest < MinerTest
   end
 
   def test_the_command_and_the_entrypoint_are_executable
-    assert File.executable?(BIN_PATH), "bin/agents-fyi-miner is not executable"
+    assert File.executable?(BIN_PATH), "bin/agents-miner is not executable"
     assert File.executable?(ENTRYPOINT_PATH), "entrypoint.sh is not executable"
   end
 end

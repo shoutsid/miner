@@ -18,7 +18,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: The output of `agents-fyi-miner --version`, the image tag, or the commit.
+      description: The output of `agents-miner --version`, the image tag, or the commit.
       placeholder: "1.0.0"
     validations:
       required: true

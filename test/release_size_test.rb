@@ -21,7 +21,7 @@ require_relative "test_helper"
 class ReleaseSizeTest < MinerTest
   include StubHelper
 
-  V = AgentsFyiMiner::Versions
+  V = AgentsMiner::Versions
   MB = 1024 * 1024
 
   PAYLOAD = {

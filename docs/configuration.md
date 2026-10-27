@@ -33,7 +33,7 @@ These are read by `entrypoint.sh`. They select a mode and build the CLI's argume
 | Variable | Default | Meaning |
 |---|---|---|
 | `API_BASE_URL` | `http://service:8001` | the service, passed as `--base-url`. On a compose network this is the service's name, not the public hostname. |
-| `MINER_HOME` | `/home/miner/.cache/agents-fyi-miner` | the state, environments, caches and heartbeat. A verifier should use its own home. |
+| `MINER_HOME` | `/home/miner/.cache/agents-miner` | the state, environments, caches and heartbeat. A verifier should use its own home. |
 | `MINER_MODE` | `serve` | `serve`, or `verify` to run a verifier. |
 | `MINER_BUDGET` | `24` | pairs per cycle for `serve`. |
 | `MINER_REPORT_BUDGET` | `1` | open reports answered per cycle for `serve`. |
@@ -70,7 +70,7 @@ and losing the environments re-installs hundreds of releases. The volumes are th
 
 ## The service key
 
-There is no `AGENTS_FYI_KEY` variable in this client. On first use it registers an operator
+There is no `AGENTS_KEY` variable in this client. On first use it registers an operator
 with the service and writes the key into the state file with mode `0600`. The key is sent as
 `X-API-Key`; it is never printed and never written into a report.
 

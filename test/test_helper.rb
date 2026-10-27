@@ -5,7 +5,7 @@ require "json"
 require "minitest/autorun"
 require "tmpdir"
 
-require_relative "../lib/agents_fyi_miner"
+require_relative "../lib/agents_miner"
 
 # What every test of the Ruby miner needs, in one place.
 #

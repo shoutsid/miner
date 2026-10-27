@@ -21,9 +21,9 @@ require_relative "test_helper"
 class RubyMineTest < MinerTest
   include StubHelper
 
-  RUBY_MINE = AgentsFyiMiner::RubyMine
-  RUBY_ENVS = AgentsFyiMiner::RubyEnvs
-  MECHANISM = AgentsFyiMiner::Mechanism
+  RUBY_MINE = AgentsMiner::RubyMine
+  RUBY_ENVS = AgentsMiner::RubyEnvs
+  MECHANISM = AgentsMiner::Mechanism
 
   def entry(name, kind, owner, method_name = "", keywords = [])
     RUBY_ENVS::Entry.new(name: name, kind: kind, owner: owner, method_name: method_name,
@@ -302,7 +302,7 @@ class RubyMineTest < MinerTest
       RUBY_ENVS::Inventory.new(package: "colorize", version: environment.version, entries: [],
         loaded: false, error: "LoadError: cannot load such file -- colorize")
     }) do
-      raised = assert_raises(AgentsFyiMiner::Errors::MinerError) do
+      raised = assert_raises(AgentsMiner::Errors::MinerError) do
         RUBY_MINE.observations_between(before_release, after_release)
       end
 
@@ -312,7 +312,7 @@ class RubyMineTest < MinerTest
 
   def test_a_finding_from_a_gem_is_written_in_ruby_s_words
     patched(:observations_between, ->(*_args, **_kwargs) {
-      [AgentsFyiMiner::Observation.new(
+      [AgentsMiner::Observation.new(
         symbol: "String#magenta",
         parameter: "",
         exception: "undefined method 'magenta' for an instance of String (NoMethodError)",

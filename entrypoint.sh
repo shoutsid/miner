@@ -16,13 +16,13 @@
 # start: both loops already treat an unreachable corpus as something to wait out,
 # which is strictly more forgiving than this.
 #
-# The client is Ruby and so is the probe (`lib/`) — `ruby /app/bin/agents-fyi-miner`
+# The client is Ruby and so is the probe (`lib/`) — `ruby /app/bin/agents-miner`
 # is the one command, and the wait below asks `/api/health` with the interpreter that is
 # already in the image rather than with one installed for the purpose.
 set -eu
 
 : "${API_BASE_URL:=http://service:8001}"
-: "${MINER_HOME:=/home/miner/.cache/agents-fyi-miner}"
+: "${MINER_HOME:=/home/miner/.cache/agents-miner}"
 : "${MINER_MODE:=serve}"
 : "${MINER_BUDGET:=48}"
 : "${MINER_REPORT_BUDGET:=1}"
@@ -86,7 +86,7 @@ done
 common="--base-url ${API_BASE_URL} --home ${MINER_HOME} --log-level ${MINER_LOG_LEVEL}"
 
 if [ "${MINER_MODE}" = "verify" ]; then
-    exec ruby /app/bin/agents-fyi-miner verify \
+    exec ruby /app/bin/agents-miner verify \
         --state "${MINER_HOME}/operator-${VERIFIER_ROLE}.json" \
         --heartbeat "${MINER_HOME}/heartbeat-${VERIFIER_ROLE}" \
         --role "${VERIFIER_ROLE}" \
@@ -98,7 +98,7 @@ if [ "${MINER_MODE}" = "verify" ]; then
         ${common} "$@"
 fi
 
-exec ruby /app/bin/agents-fyi-miner serve \
+exec ruby /app/bin/agents-miner serve \
     --state "${MINER_HOME}/operator.json" \
     --heartbeat "${MINER_HOME}/heartbeat" \
     --top "${MINER_TOP}" \

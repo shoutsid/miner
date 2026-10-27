@@ -10,7 +10,7 @@ require_relative "test_helper"
 # tunnel, which is not a difference a test of a queue should have, and the autouse fixture
 # that used to enforce it is now `setup`.
 class WatchlistTest < MinerTest
-  W = AgentsFyiMiner::Watchlist
+  W = AgentsMiner::Watchlist
 
   def setup
     super
@@ -151,7 +151,7 @@ class WatchlistTest < MinerTest
     # the log.
     fetch_returns(JSON.generate({ "rows" => [{ "project" => "popular" }] }))
 
-    refused = -> { raise AgentsFyiMiner::Errors::CorpusError.new("HTTP Error 422", permanent: true) }
+    refused = -> { raise AgentsMiner::Errors::CorpusError.new("HTTP Error 422", permanent: true) }
     chosen = W.watchlist(cache: @home, remote: refused)
 
     refute_nil chosen.queue_error
@@ -164,11 +164,11 @@ class WatchlistTest < MinerTest
     # for an index the service has stopped accepting evidence about, so falling back would build
     # an environment for every pair and have every filing refused at the end.
     cached(%w[popular])
-    paused = -> { raise AgentsFyiMiner::Errors::CollectionPaused.new("paused", ecosystem: "python") }
+    paused = -> { raise AgentsMiner::Errors::CollectionPaused.new("paused", ecosystem: "python") }
 
-    assert_raises(AgentsFyiMiner::Errors::CollectionPaused) do
+    assert_raises(AgentsMiner::Errors::CollectionPaused) do
       W.watchlist(cache: @home, remote: paused,
-        re_raise: [AgentsFyiMiner::Errors::CollectionPaused])
+        re_raise: [AgentsMiner::Errors::CollectionPaused])
     end
   end
 
@@ -229,7 +229,7 @@ class WatchlistTest < MinerTest
     # 3,000 names, each once, and the body they serialise to has to stay under the 64 KiB the
     # service accepts a seed in — past that the seed is refused and the miner is told it has no
     # breadth at all.
-    skip "the snapshot is still in the Python package: mv miner/agents_fyi_miner/data/rubygems-downloads.txt miner/lib/agents_fyi_miner/data/" unless W::RUBY_SNAPSHOT.file?
+    skip "the snapshot is still in the Python package: mv miner/agents_miner/data/rubygems-downloads.txt miner/lib/agents_miner/data/" unless W::RUBY_SNAPSHOT.file?
 
     names = W.ruby_downloads
 
@@ -250,7 +250,7 @@ class WatchlistTest < MinerTest
     # An empty ranking and an index that publishes nothing are the same list, and one of them is a
     # data file that did not ship. The error is its own class so `watchlist` cannot mistake it for
     # an unreachable ranking and quietly hand back the curated names.
-    error = assert_raises(AgentsFyiMiner::Watchlist::SnapshotMissing) do
+    error = assert_raises(AgentsMiner::Watchlist::SnapshotMissing) do
       W.ruby_downloads(snapshot: @home + "absent.txt")
     end
 

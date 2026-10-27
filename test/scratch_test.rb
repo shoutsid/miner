@@ -15,7 +15,7 @@ require_relative "test_helper"
 # entrypoint gets disk. The *sweep* exists because pip can only remove its own scratch when it is
 # allowed to finish, and a build killed by `INSTALL_TIMEOUT` never is.
 class ScratchTest < MinerTest
-  E = AgentsFyiMiner::Envs
+  E = AgentsMiner::Envs
 
   def make_scratch(root, name, megabytes: 1, age: 10_000)
     entry = dir(root.basename.to_s, name)
@@ -29,7 +29,7 @@ class ScratchTest < MinerTest
     # Not `/tmp`: that is a tmpfs here, and a gigabyte wheel unpacked into it is a gigabyte of the
     # container's memory limit.
     ENV.delete("TMPDIR")
-    home = @home + "agents-fyi-miner"
+    home = @home + "agents-miner"
 
     root = E.use_scratch_dir(home)
 
@@ -44,7 +44,7 @@ class ScratchTest < MinerTest
     chosen = @home + "somewhere-else"
     ENV["TMPDIR"] = chosen.to_s
 
-    root = E.use_scratch_dir(@home + "agents-fyi-miner")
+    root = E.use_scratch_dir(@home + "agents-miner")
 
     assert_equal chosen, root
     assert_equal chosen.to_s, ENV["TMPDIR"]

@@ -18,7 +18,7 @@ require_relative "test_helper"
 # What *is* testable about them without installing anything is the walk, and that is what
 # these tests cover.
 class CliReportsTest < MinerTest
-  R = AgentsFyiMiner::CliReports
+  R = AgentsMiner::CliReports
 
   REPORT = {
     "id" => "00000000-0000-0000-0000-000000000001",
@@ -91,10 +91,10 @@ class CliReportsTest < MinerTest
     # An outage must be an outage: read as an empty page it would report "nothing open that this
     # miner could answer", which is the one answer that stops anybody looking.
     down = Class.new(FakeCorpus) do
-      def me = raise(AgentsFyiMiner::Errors::CorpusError, "could not be reached")
+      def me = raise(AgentsMiner::Errors::CorpusError, "could not be reached")
     end.new([])
 
-    assert_raises(AgentsFyiMiner::Errors::CorpusError) { R.open_questions(down) }
+    assert_raises(AgentsMiner::Errors::CorpusError) { R.open_questions(down) }
   end
 
   # --- what a filed finding carries ----------------------------------------------------
@@ -102,7 +102,7 @@ class CliReportsTest < MinerTest
   # --- what a filed finding carries ----------------------------------------------------
 
   def observation(**overrides)
-    AgentsFyiMiner::Observation.new(
+    AgentsMiner::Observation.new(
       symbol: "Client", parameter: "proxies",
       exception: "TypeError: unexpected keyword argument 'proxies'",
       accepted_before: true, accepted_after: false,
@@ -111,8 +111,8 @@ class CliReportsTest < MinerTest
   end
 
   def payload_for(library, version, from_version, observations)
-    finding = AgentsFyiMiner.summarise(library, version, from_version, Array(observations))
-    AgentsFyiMiner::Reporting.payload_for(finding, from_version: from_version)
+    finding = AgentsMiner.summarise(library, version, from_version, Array(observations))
+    AgentsMiner::Reporting.payload_for(finding, from_version: from_version)
   end
 
   def test_a_finding_carries_all_three_boundary_fields_on_the_wire
@@ -124,7 +124,7 @@ class CliReportsTest < MinerTest
     assert_equal "0.27.2", payload["from_version"]
     assert_equal "proxies", payload["subject"]
     assert_equal "parameter_renamed", payload["change_kind"]
-    assert_includes AgentsFyiMiner::Mechanism::ALL, payload["change_kind"]
+    assert_includes AgentsMiner::Mechanism::ALL, payload["change_kind"]
   end
 
   def test_the_subject_sent_is_the_bare_name_the_service_stores

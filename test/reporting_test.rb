@@ -8,8 +8,8 @@ require_relative "test_helper"
 # service stores `attempted` as the evidence, so a sentence describing a call a symbol finding never
 # made is a report whose evidence contradicts its own trace.
 class ReportingTest < MinerTest
-  MECHANISM = AgentsFyiMiner::Mechanism
-  REPORTING = AgentsFyiMiner::Reporting
+  MECHANISM = AgentsMiner::Mechanism
+  REPORTING = AgentsMiner::Reporting
 
   def a_finding(**overrides)
     fields = {
@@ -21,7 +21,7 @@ class ReportingTest < MinerTest
       repair: "proxy",
       traceback: "Traceback (most recent call last):\nTypeError: nope"
     }.merge(overrides)
-    summarise("httpx", "0.28.1", "0.27.2", [AgentsFyiMiner::Observation.new(**fields)])
+    summarise("httpx", "0.28.1", "0.27.2", [AgentsMiner::Observation.new(**fields)])
   end
 
   def payload_for(finding, from_version) = REPORTING.payload_for(finding, from_version: from_version)
@@ -138,14 +138,14 @@ class ReportingTest < MinerTest
   def test_a_finding_the_corpus_would_refuse_is_not_filed
     # `duplicate` is what submit refuses, so filing it asks a question the miner already has the
     # answer to.
-    refute AgentsFyiMiner::Errors.filable?("duplicate")
+    refute AgentsMiner::Errors.filable?("duplicate")
   end
 
   def test_a_finding_with_every_identifying_symptom_already_present_is_not_filed
     # `likely_duplicate` means a candidate carries every symptom in the draft including one that
     # identifies it. That is the same failure, and the honest answer is to verify the report rather
     # than file a second one — which the miner cannot do, because it has not run anybody's fix.
-    refute AgentsFyiMiner::Errors.filable?("likely_duplicate")
+    refute AgentsMiner::Errors.filable?("likely_duplicate")
   end
 
   def test_a_finding_the_corpus_merely_finds_close_is_filed
@@ -153,23 +153,23 @@ class ReportingTest < MinerTest
     # being close enough to refuse, and the advice for the variant where the titles read alike but
     # the symptoms disagree is that submitting would not be refused — so stopping at `new` would
     # decline exactly the findings the duplicate rule has just said are distinct.
-    assert AgentsFyiMiner::Errors.filable?("similar")
+    assert AgentsMiner::Errors.filable?("similar")
   end
 
   def test_a_finding_the_corpus_has_never_seen_is_filed
-    assert AgentsFyiMiner::Errors.filable?("new")
+    assert AgentsMiner::Errors.filable?("new")
   end
 
   def test_an_unrecognised_verdict_is_not_taken_as_permission_to_write
     # A verdict the miner does not know is not a yes. Filing is a write to a shared corpus, so the
     # unknown case has to fail towards silence.
-    refute AgentsFyiMiner::Errors.filable?("unknown")
-    refute AgentsFyiMiner::Errors.filable?("")
+    refute AgentsMiner::Errors.filable?("unknown")
+    refute AgentsMiner::Errors.filable?("")
   end
 
   private
 
   def summarise(library, version, from_version, group)
-    AgentsFyiMiner.summarise(library, version, from_version, group)
+    AgentsMiner.summarise(library, version, from_version, group)
   end
 end

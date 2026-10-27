@@ -22,7 +22,7 @@ class WheelCacheTest < MinerTest
     # like a cache comfortably inside its budget.
     ENV["PIP_CACHE_DIR"] = (@home + "elsewhere").to_s
 
-    assert_equal @home + "elsewhere", AgentsFyiMiner::WheelCache.cache_dir(@home + "home")
+    assert_equal @home + "elsewhere", AgentsMiner::WheelCache.cache_dir(@home + "home")
   end
 
   def test_a_blank_cache_variable_is_not_a_cache_directory
@@ -33,31 +33,31 @@ class WheelCacheTest < MinerTest
     ENV["PIP_CACHE_DIR"] = ""
 
     assert_equal @home + ".cache" + "pip",
-      AgentsFyiMiner::WheelCache.cache_dir(@home + ".cache" + "agents-fyi-miner")
+      AgentsMiner::WheelCache.cache_dir(@home + ".cache" + "agents-miner")
   end
 
   def test_with_nothing_configured_it_is_the_sibling_of_the_clients_home
-    # Which is where pip puts it anyway — `~/.cache/pip` beside `~/.cache/agents-fyi-miner` — so
+    # Which is where pip puts it anyway — `~/.cache/pip` beside `~/.cache/agents-miner` — so
     # the bound works for a client started without the image's environment, as a test or a
     # one-off run is.
     ENV.delete("PIP_CACHE_DIR")
-    home = @home + ".cache" + "agents-fyi-miner"
+    home = @home + ".cache" + "agents-miner"
 
-    assert_equal @home + ".cache" + "pip", AgentsFyiMiner::WheelCache.cache_dir(home)
+    assert_equal @home + ".cache" + "pip", AgentsMiner::WheelCache.cache_dir(home)
   end
 
   def test_a_cache_inside_its_budget_is_left_alone
     cache = @home + "pip"
     make_entry(cache, "ab", "cd", megabytes: 1)
 
-    assert_equal [0, 0], AgentsFyiMiner::WheelCache.prune(cache, budget: 10 * 1024 * 1024)
+    assert_equal [0, 0], AgentsMiner::WheelCache.prune(cache, budget: 10 * 1024 * 1024)
     assert (cache + "http-v2" + "ab" + "cd").exist?
   end
 
   def test_a_cache_with_no_directory_at_all_is_not_an_error
     # A first start, or a client whose wheels are all still to be fetched.
-    assert_equal [0, 0], AgentsFyiMiner::WheelCache.prune(@home + "absent")
-    assert_equal 0, AgentsFyiMiner::WheelCache.size(@home + "absent")
+    assert_equal [0, 0], AgentsMiner::WheelCache.prune(@home + "absent")
+    assert_equal 0, AgentsMiner::WheelCache.size(@home + "absent")
   end
 
   def test_the_least_recently_used_entries_go_first
@@ -67,7 +67,7 @@ class WheelCacheTest < MinerTest
     old = make_entry(cache, "aa", "old", megabytes: 2, age: 100_000)
     fresh = make_entry(cache, "bb", "new", megabytes: 2, age: 10_000)
 
-    removed, = AgentsFyiMiner::WheelCache.prune(cache, budget: 3 * 1024 * 1024)
+    removed, = AgentsMiner::WheelCache.prune(cache, budget: 3 * 1024 * 1024)
 
     assert_equal 1, removed
     refute old.exist?
@@ -80,7 +80,7 @@ class WheelCacheTest < MinerTest
     cache = @home + "pip"
     live = make_entry(cache, "aa", "live", megabytes: 4, age: 1)
 
-    removed, = AgentsFyiMiner::WheelCache.prune(cache, budget: 1, quiet: 300)
+    removed, = AgentsMiner::WheelCache.prune(cache, budget: 1, quiet: 300)
 
     assert_equal 0, removed
     assert live.exist?
@@ -92,7 +92,7 @@ class WheelCacheTest < MinerTest
     cache = @home + "pip"
     entry = make_entry(cache, "aa", "one", megabytes: 4, age: 100_000)
 
-    AgentsFyiMiner::WheelCache.prune(cache, budget: 1)
+    AgentsMiner::WheelCache.prune(cache, budget: 1)
 
     refute entry.exist?
   end
@@ -106,7 +106,7 @@ class WheelCacheTest < MinerTest
     built = dir("pip", "wheels", "built")
     (built + "pkg-1.0-py3-none-any.whl").write("x")
 
-    found = AgentsFyiMiner::WheelCache.entries(cache).map { |path| path.basename.to_s }.sort
+    found = AgentsMiner::WheelCache.entries(cache).map { |path| path.basename.to_s }.sort
 
     assert_equal %w[built one two], found
   end
@@ -128,9 +128,9 @@ class WheelCacheTest < MinerTest
     lengths = entry.children.sum { |child| child.stat.size }
 
     assert_equal 64, lengths
-    assert_operator AgentsFyiMiner::WheelCache.size(cache), :>, lengths,
+    assert_operator AgentsMiner::WheelCache.size(cache), :>, lengths,
       "the size is file lengths, so a budget checked against it is wrong"
-    assert_operator AgentsFyiMiner::WheelCache.size(cache), :>=, 64 * unit
+    assert_operator AgentsMiner::WheelCache.size(cache), :>=, 64 * unit
   end
 
   private

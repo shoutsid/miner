@@ -121,7 +121,7 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # The client, its data and its command. `lib/` is the whole program and carries the
-# breadth ranking it reads offline (`lib/agents_fyi_miner/data/`), `bin/` is the
+# breadth ranking it reads offline (`lib/agents_miner/data/`), `bin/` is the
 # command the entrypoint and a person at a shell both reach, and `entrypoint.sh` is
 # what the container starts through.
 COPY lib ./lib
@@ -144,11 +144,11 @@ COPY entrypoint.sh ./entrypoint.sh
 # `rubyenvs.rb`), and a directory created at build time would be one place the
 # three clients could be pointed at by accident.
 RUN useradd --system --uid 10002 --create-home miner \
-    && mkdir -p /home/miner/.cache/agents-fyi-miner \
-        /home/miner/.cache/agents-fyi-verifier \
-        /home/miner/.cache/agents-fyi-verifier-independent \
+    && mkdir -p /home/miner/.cache/agents-miner \
+        /home/miner/.cache/agents-verifier \
+        /home/miner/.cache/agents-verifier-independent \
         /home/miner/.cache/pip \
-    && chmod +x /app/entrypoint.sh /app/bin/agents-fyi-miner \
+    && chmod +x /app/entrypoint.sh /app/bin/agents-miner \
     && chown -R miner:miner /app /home/miner
 USER miner
 
@@ -160,6 +160,6 @@ USER miner
 # than a slow cycle worth restarting. The interpreter already in the image is the
 # client, so nothing is installed just to probe a file.
 HEALTHCHECK --interval=5m --timeout=15s --start-period=15m --retries=3 \
-    CMD ruby -e "p='/home/miner/.cache/agents-fyi-miner/heartbeat'; exit(File.exist?(p) && (Time.now - File.mtime(p)) < 5400 ? 0 : 1)"
+    CMD ruby -e "p='/home/miner/.cache/agents-miner/heartbeat'; exit(File.exist?(p) && (Time.now - File.mtime(p)) < 5400 ? 0 : 1)"
 
 ENTRYPOINT ["/app/entrypoint.sh"]

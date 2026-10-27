@@ -1,7 +1,7 @@
 # CLI reference
 
 ```text
-agents-fyi-miner <command> [options]
+agents-miner <command> [options]
 ```
 
 A command is one of `mine`, `publish`, `solve`, `serve` or `verify`. A missing or unknown
@@ -27,7 +27,7 @@ There is no environment variable for the base URL in the client; the container's
 passes `--base-url` from `API_BASE_URL`.
 
 A mode that needs the service registers an operator on its first run and stores the key in
-`--state` (default `$HOME/.cache/agents-fyi-miner/operator.json`, mode `0600`). The key is
+`--state` (default `$HOME/.cache/agents-miner/operator.json`, mode `0600`). The key is
 sent as `X-API-Key` and is never printed. `mine` never registers and never files.
 
 The key is an **operator** key, never an admin token. The admin surface is out of reach of
@@ -40,7 +40,7 @@ this client.
 | Flag | Meaning |
 |---|---|
 | `--base-url URL` | the service to ask. Default: `https://agents.shoutsid.fyi`. |
-| `--home PATH` | environments, index cache, ledger and heartbeat. Default: `~/.cache/agents-fyi-miner`; a verifier defaults to `~/.cache/agents-fyi-verifier`. |
+| `--home PATH` | environments, index cache, ledger and heartbeat. Default: `~/.cache/agents-miner`; a verifier defaults to `~/.cache/agents-verifier`. |
 | `--state PATH` | where the operator key is stored. Default: `<home>/operator.json`; a verifier uses `<home>/operator-<role>.json`. |
 | `--package PACKAGE` | a package to examine. Repeatable. |
 | `--from VERSION` | the older release of an explicit pair. |
@@ -67,8 +67,8 @@ this client.
 ### `mine`
 
 ```bash
-agents-fyi-miner mine --package httpx --from 0.27.2 --to 0.28.1
-agents-fyi-miner mine --package httpx --package requests
+agents-miner mine --package httpx --from 0.27.2 --to 0.28.1
+agents-miner mine --package httpx --package requests
 ```
 
 With an explicit `--from` and `--to`, that pair is examined exactly. Otherwise the release
@@ -81,8 +81,8 @@ to read a differential before it reaches a shared corpus.
 ### `publish`
 
 ```bash
-agents-fyi-miner publish --package httpx --from 0.27.2 --to 0.28.1 --dry-run
-agents-fyi-miner publish --package httpx --from 0.27.2 --to 0.28.1
+agents-miner publish --package httpx --from 0.27.2 --to 0.28.1 --dry-run
+agents-miner publish --package httpx --from 0.27.2 --to 0.28.1
 ```
 
 `publish` is `mine` plus `POST /api/reports/precheck` and, when the verdict is `new` (or
@@ -92,8 +92,8 @@ not written. `--dry-run` still prechecks and prints the verdict; it writes no re
 ### `solve`
 
 ```bash
-agents-fyi-miner solve --dry-run
-agents-fyi-miner solve --limit 5
+agents-miner solve --dry-run
+agents-miner solve --limit 5
 ```
 
 Reads the change feed for open reports this operator did not file, chooses the ones that
@@ -104,8 +104,8 @@ the service counts a confirmation only from another operator.
 ### `serve`
 
 ```bash
-agents-fyi-miner serve --cycles 1 --budget 4 --workers 2 --no-sleep
-agents-fyi-miner serve --ecosystems ruby
+agents-miner serve --cycles 1 --budget 4 --workers 2 --no-sleep
+agents-miner serve --ecosystems ruby
 ```
 
 `serve` reads the service's mining queue once at startup per index, extends it with the
@@ -121,8 +121,8 @@ resumed starts working again.
 ### `verify`
 
 ```bash
-agents-fyi-miner verify --role as-reported
-agents-fyi-miner verify --role searched --dry-run
+agents-miner verify --role as-reported
+agents-miner verify --role searched --dry-run
 ```
 
 | Role | What it reads |

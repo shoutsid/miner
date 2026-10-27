@@ -15,7 +15,7 @@ require_relative "test_helper"
 # left one behind would decide the next test's answer — and the block runs against the *test*
 # (`instance_exec`), so a stub can still call `assert` or read `@home`.
 class VerifierTest < MinerTest
-  V = AgentsFyiMiner::Verifier
+  V = AgentsMiner::Verifier
 
   REPORTED = {
     "id" => "00000000-0000-0000-0000-000000000001",
@@ -142,7 +142,7 @@ class VerifierTest < MinerTest
       unless @bodies.key?(report_id)
         # The corpus reading this request and declining it, as a deleted report answers for ever.
         # `transient` is the other kind, an outage.
-        raise AgentsFyiMiner::Errors::CorpusError.new("no such report #{report_id}",
+        raise AgentsMiner::Errors::CorpusError.new("no such report #{report_id}",
           permanent: !@transient)
       end
       @bodies[report_id]
@@ -206,32 +206,32 @@ class VerifierTest < MinerTest
   end
 
   def verdict(outcome, executed = "", detail: "", unreachable: false)
-    AgentsFyiMiner::Verifying::Verdict.new(outcome: outcome, executed: executed, detail: detail,
+    AgentsMiner::Verifying::Verdict.new(outcome: outcome, executed: executed, detail: detail,
       unreachable: unreachable)
   end
 
   # A verifier with the installer and the probes taken out. `verdicts` scripts what the check
   # returns, keyed by the claim's version.
-  def verifier_for(session, verdicts: {}, role: AgentsFyiMiner::Verifying::AS_REPORTED, state: nil,
+  def verifier_for(session, verdicts: {}, role: AgentsMiner::Verifying::AS_REPORTED, state: nil,
                    ledger: nil, **rest)
     @check_calls = []
-    stub(AgentsFyiMiner::Envs, :build, lambda { |library, version, home:|
-      AgentsFyiMiner::Envs::Env.new(package: library, version: version,
+    stub(AgentsMiner::Envs, :build, lambda { |library, version, home:|
+      AgentsMiner::Envs::Env.new(package: library, version: version,
         root: @home + "#{library}-#{version}")
     })
-    stub(AgentsFyiMiner::Envs, :prune, ->(_home, budget: nil, quiet: nil) { [0, 0] })
-    stub(AgentsFyiMiner::RubyEnvs, :prune, ->(_home, budget:, quiet: 900) { [0, 0] })
-    stub(AgentsFyiMiner::WheelCache, :prune, ->(_cache, budget: nil, quiet: nil) { [0, 0] })
-    stub(AgentsFyiMiner::Verifying, :check, lambda { |claim, chosen_role, build:, suffix: ""|
+    stub(AgentsMiner::Envs, :prune, ->(_home, budget: nil, quiet: nil) { [0, 0] })
+    stub(AgentsMiner::RubyEnvs, :prune, ->(_home, budget:, quiet: 900) { [0, 0] })
+    stub(AgentsMiner::WheelCache, :prune, ->(_cache, budget: nil, quiet: nil) { [0, 0] })
+    stub(AgentsMiner::Verifying, :check, lambda { |claim, chosen_role, build:, suffix: ""|
       @check_calls << [claim.subject, chosen_role, suffix]
       scripted = verdicts[claim.version]
       raise scripted if scripted.is_a?(Exception)
 
-      scripted || verdict(AgentsFyiMiner::Ledger::REPRODUCED, "ran the call")
+      scripted || verdict(AgentsMiner::Ledger::REPRODUCED, "ran the call")
     })
     store = state || (@home + "ledger-#{role}.json")
     V.new(session: session, home: @home, state: store, role: role,
-      ledger: ledger || AgentsFyiMiner::Ledger.load(store), **rest)
+      ledger: ledger || AgentsMiner::Ledger.load(store), **rest)
   end
 
   # --- the vote ------------------------------------------------------------
@@ -244,12 +244,12 @@ class VerifierTest < MinerTest
     votes = session.calls.select { |call| call[0] == :verify }
     assert_equal 1, votes.length
     payload = votes[0][2]
-    assert_equal AgentsFyiMiner::Ledger::REPRODUCED, payload["outcome"]
+    assert_equal AgentsMiner::Ledger::REPRODUCED, payload["outcome"]
     assert_includes payload["environment"], "httpx 0.28.1"
     assert_equal "ran the call", payload["notes"]
     assert_equal 1, stats.reproduced
-    assert_equal AgentsFyiMiner::Ledger::REPRODUCED,
-      AgentsFyiMiner::Ledger.load(instance.state).report(REPORTED["id"]).outcome
+    assert_equal AgentsMiner::Ledger::REPRODUCED,
+      AgentsMiner::Ledger.load(instance.state).report(REPORTED["id"]).outcome
   end
 
   def test_the_verifier_never_confirms_its_own_report
@@ -268,7 +268,7 @@ class VerifierTest < MinerTest
     # that matters — no look. A verifier that read first would spend its walk on the other index
     # before reaching the one it was asked to work.
     session = fake_session([REPORTED, GEM_REPORT])
-    instance = verifier_for(session, ecosystems: [AgentsFyiMiner::Ecosystems::RUBY])
+    instance = verifier_for(session, ecosystems: [AgentsMiner::Ecosystems::RUBY])
 
     instance.one_cycle
 
@@ -276,7 +276,7 @@ class VerifierTest < MinerTest
       "the Python report is out of scope, so its body is never fetched"
     voted = session.calls.select { |call| call[0] == :verify }.map { |call| call[1] }
     assert_equal [GEM_REPORT["id"]], voted
-    ledger = AgentsFyiMiner::Ledger.load(instance.state)
+    ledger = AgentsMiner::Ledger.load(instance.state)
     refute ledger.seen?(REPORTED["id"]), "a scope the deployment chose is not reconsidered every pass"
     assert ledger.seen?(GEM_REPORT["id"])
   end
@@ -287,7 +287,7 @@ class VerifierTest < MinerTest
     # the pause, and the verifier asks before it reads a report.
     session = fake_session([GEM_REPORT])
     session.paused = { "ruby" => true }
-    instance = verifier_for(session, ecosystems: [AgentsFyiMiner::Ecosystems::RUBY])
+    instance = verifier_for(session, ecosystems: [AgentsMiner::Ecosystems::RUBY])
 
     stats = instance.one_cycle
 
@@ -296,7 +296,7 @@ class VerifierTest < MinerTest
       "the index is paused, so there is nothing worth reading a report for"
     assert_equal 1, stats.paused
     assert_includes stats.summary, "left for a paused index"
-    assert AgentsFyiMiner::Ledger.load(instance.state).seen?(GEM_REPORT["id"])
+    assert AgentsMiner::Ledger.load(instance.state).seen?(GEM_REPORT["id"])
   end
 
   def test_one_refused_vote_does_not_abort_the_cycle_or_lose_the_rest
@@ -307,7 +307,7 @@ class VerifierTest < MinerTest
     session.after_submit = lambda do |report_id|
       next unless report_id == REPORTED["id"]
 
-      raise AgentsFyiMiner::Errors::CollectionPaused.new("python is paused", ecosystem: "python")
+      raise AgentsMiner::Errors::CollectionPaused.new("python is paused", ecosystem: "python")
     end
     instance = verifier_for(session)
 
@@ -316,10 +316,10 @@ class VerifierTest < MinerTest
     voted = session.calls.select { |call| call[0] == :verify }.map { |call| call[1] }
     assert_includes voted, GEM_REPORT["id"], "the other index's report is still voted on"
     assert_equal 1, stats.paused
-    ledger = AgentsFyiMiner::Ledger.load(instance.state)
+    ledger = AgentsMiner::Ledger.load(instance.state)
     assert ledger.seen?(REPORTED["id"]), "the refused report stays due and is not recorded as failed"
     assert_nil ledger.report(REPORTED["id"])
-    assert_equal AgentsFyiMiner::Ledger::REPRODUCED, ledger.report(GEM_REPORT["id"]).outcome
+    assert_equal AgentsMiner::Ledger::REPRODUCED, ledger.report(GEM_REPORT["id"]).outcome
   end
 
   def test_a_report_the_corpus_no_longer_has_is_dropped_rather_than_read_forever
@@ -328,11 +328,11 @@ class VerifierTest < MinerTest
     # on it.
     session = fake_session([]) # the feed does not carry it and the corpus has not got it
     instance = verifier_for(session,
-      ledger: AgentsFyiMiner::Ledger.new(backlog: { REPORTED["id"] => 1.0 }))
+      ledger: AgentsMiner::Ledger.new(backlog: { REPORTED["id"] => 1.0 }))
 
     instance.one_cycle
 
-    refute AgentsFyiMiner::Ledger.load(instance.state).seen?(REPORTED["id"])
+    refute AgentsMiner::Ledger.load(instance.state).seen?(REPORTED["id"])
   end
 
   def test_a_report_that_could_not_be_read_over_an_outage_keeps_its_place
@@ -340,11 +340,11 @@ class VerifierTest < MinerTest
     # answering, and the retry delay `due_report?` schedules exists for exactly this.
     session = fake_session([], transient: true)
     instance = verifier_for(session,
-      ledger: AgentsFyiMiner::Ledger.new(backlog: { REPORTED["id"] => 1.0 }))
+      ledger: AgentsMiner::Ledger.new(backlog: { REPORTED["id"] => 1.0 }))
 
     instance.one_cycle
 
-    assert AgentsFyiMiner::Ledger.load(instance.state).seen?(REPORTED["id"])
+    assert AgentsMiner::Ledger.load(instance.state).seen?(REPORTED["id"])
   end
 
   def test_an_open_report_is_dropped_until_it_gains_a_fix
@@ -355,7 +355,7 @@ class VerifierTest < MinerTest
     instance = verifier_for(session)
     instance.one_cycle
     assert_empty session.calls.select { |call| call[0] == :verify }
-    assert_nil AgentsFyiMiner::Ledger.load(instance.state).report(REPORTED["id"])
+    assert_nil AgentsMiner::Ledger.load(instance.state).report(REPORTED["id"])
 
     # Somebody proposes a fix: the report is updated, so it is at the end of the feed again with a
     # later timestamp.
@@ -378,25 +378,25 @@ class VerifierTest < MinerTest
     # to `resolved_verified`.
     session = fake_session([REPORTED])
     instance = verifier_for(session,
-      verdicts: { "0.28.1" => verdict(AgentsFyiMiner::Ledger::DISSENTED, "it resolved") })
+      verdicts: { "0.28.1" => verdict(AgentsMiner::Ledger::DISSENTED, "it resolved") })
     stats = instance.one_cycle
 
     assert_equal 1, stats.dissent
     assert_equal 0, stats.reproduced
-    assert_equal AgentsFyiMiner::Ledger::DISSENTED,
+    assert_equal AgentsMiner::Ledger::DISSENTED,
       session.calls.find { |call| call[0] == :verify }[2]["outcome"]
-    assert_equal AgentsFyiMiner::Ledger::DISSENTED,
-      AgentsFyiMiner::Ledger.load(instance.state).report(REPORTED["id"]).outcome
+    assert_equal AgentsMiner::Ledger::DISSENTED,
+      AgentsMiner::Ledger.load(instance.state).report(REPORTED["id"]).outcome
   end
 
   def test_a_partial_is_recorded_and_the_loop_keeps_going
     session = fake_session([REPORTED])
     instance = verifier_for(session,
-      verdicts: { "0.28.1" => verdict(AgentsFyiMiner::Ledger::PARTIAL, "the fix was refused") })
+      verdicts: { "0.28.1" => verdict(AgentsMiner::Ledger::PARTIAL, "the fix was refused") })
     stats = instance.one_cycle
 
     assert_equal 1, stats.partial
-    assert_equal AgentsFyiMiner::Ledger::PARTIAL,
+    assert_equal AgentsMiner::Ledger::PARTIAL,
       session.calls.find { |call| call[0] == :verify }[2]["outcome"]
   end
 
@@ -407,7 +407,7 @@ class VerifierTest < MinerTest
 
     assert_equal 0, stats.no_claim # it never reaches the check
     assert_empty session.calls.select { |call| call[0] == :verify }
-    assert_nil AgentsFyiMiner::Ledger.load(instance.state).report(REPORTED["id"])
+    assert_nil AgentsMiner::Ledger.load(instance.state).report(REPORTED["id"])
   end
 
   def test_a_report_with_nothing_executable_in_it_is_dropped
@@ -417,14 +417,14 @@ class VerifierTest < MinerTest
     session = fake_session([REPORTED])
     instance = verifier_for(
       session,
-      verdicts: { "0.28.1" => verdict(AgentsFyiMiner::Verifying::NO_CLAIM, "",
+      verdicts: { "0.28.1" => verdict(AgentsMiner::Verifying::NO_CLAIM, "",
         detail: "the report names no reference to run") }
     )
     stats = instance.one_cycle
 
     assert_equal 1, stats.no_claim
     assert_empty session.calls.select { |call| call[0] == :verify }
-    assert_nil AgentsFyiMiner::Ledger.load(instance.state).report(REPORTED["id"])
+    assert_nil AgentsMiner::Ledger.load(instance.state).report(REPORTED["id"])
   end
 
   def test_a_release_that_could_not_be_asked_leaves_the_report_in_the_backlog
@@ -436,7 +436,7 @@ class VerifierTest < MinerTest
     session = fake_session([REPORTED])
     instance = verifier_for(
       session,
-      verdicts: { "0.28.1" => verdict(AgentsFyiMiner::Verifying::NO_CLAIM, "",
+      verdicts: { "0.28.1" => verdict(AgentsMiner::Verifying::NO_CLAIM, "",
         detail: "httpx 0.28.1 could not be asked about `AsyncClient(app=…)`",
         unreachable: true) }
     )
@@ -445,8 +445,8 @@ class VerifierTest < MinerTest
     assert_equal 1, stats.skipped
     assert_equal 0, stats.no_claim
     assert_empty session.calls.select { |call| call[0] == :verify }
-    record = AgentsFyiMiner::Ledger.load(instance.state).report(REPORTED["id"])
-    assert_equal AgentsFyiMiner::Ledger::FAILED, record.outcome
+    record = AgentsMiner::Ledger.load(instance.state).report(REPORTED["id"])
+    assert_equal AgentsMiner::Ledger::FAILED, record.outcome
     assert_operator record.next_at, :>, Time.now.to_f
   end
 
@@ -455,36 +455,36 @@ class VerifierTest < MinerTest
     # an outage would lose the work permanently.
     session = fake_session([REPORTED])
     instance = verifier_for(session,
-      verdicts: { "0.28.1" => AgentsFyiMiner::Errors::MinerError.new("no wheel") })
+      verdicts: { "0.28.1" => AgentsMiner::Errors::MinerError.new("no wheel") })
     stats = instance.one_cycle
 
     assert_equal 1, stats.skipped
     assert_empty session.calls.select { |call| call[0] == :verify }
-    record = AgentsFyiMiner::Ledger.load(instance.state).report(REPORTED["id"])
-    assert_equal AgentsFyiMiner::Ledger::FAILED, record.outcome
+    record = AgentsMiner::Ledger.load(instance.state).report(REPORTED["id"])
+    assert_equal AgentsMiner::Ledger::FAILED, record.outcome
     assert_operator record.next_at, :>, Time.now.to_f
   end
 
   def test_a_refused_vote_is_not_a_confirmation_and_is_retried
     session = fake_session([REPORTED],
-      submit_error: AgentsFyiMiner::Errors::CorpusError.new("refused", permanent: true))
+      submit_error: AgentsMiner::Errors::CorpusError.new("refused", permanent: true))
     instance = verifier_for(session)
     stats = instance.one_cycle
 
     assert_equal 1, stats.skipped
-    assert_equal AgentsFyiMiner::Ledger::FAILED,
-      AgentsFyiMiner::Ledger.load(instance.state).report(REPORTED["id"]).outcome
+    assert_equal AgentsMiner::Ledger::FAILED,
+      AgentsMiner::Ledger.load(instance.state).report(REPORTED["id"]).outcome
   end
 
   def test_a_rate_limited_vote_leaves_the_report_due_and_the_loop_waits
     # A 429 is the service's protection, not this report's failure: marking it failed would retry
     # it in six hours and lose the wait the service asked for.
     session = fake_session([REPORTED],
-      submit_error: AgentsFyiMiner::Errors::RateLimited.new("429", retry_after: 30))
+      submit_error: AgentsMiner::Errors::RateLimited.new("429", retry_after: 30))
     instance = verifier_for(session)
 
-    assert_raises(AgentsFyiMiner::Errors::RateLimited) { instance.one_cycle }
-    assert_nil AgentsFyiMiner::Ledger.load(instance.state).report(REPORTED["id"])
+    assert_raises(AgentsMiner::Errors::RateLimited) { instance.one_cycle }
+    assert_nil AgentsMiner::Ledger.load(instance.state).report(REPORTED["id"])
   end
 
   def test_a_report_is_checked_once_and_not_every_cycle
@@ -501,7 +501,7 @@ class VerifierTest < MinerTest
     instance = verifier_for(session)
     instance.one_cycle
 
-    assert_equal REPORTED["updated_at"], AgentsFyiMiner::Ledger.load(instance.state).cursor_since
+    assert_equal REPORTED["updated_at"], AgentsMiner::Ledger.load(instance.state).cursor_since
     instance.one_cycle
     reads = session.calls.select { |call| call[0] == :changes }
     # The second cycle asks from the cursor rather than from the beginning.
@@ -513,7 +513,7 @@ class VerifierTest < MinerTest
     # rate-limited bounded run never ended — a test that hangs is the expensive way to find that
     # out.
     session = fake_session([REPORTED],
-      submit_error: AgentsFyiMiner::Errors::RateLimited.new("429", retry_after: 1))
+      submit_error: AgentsMiner::Errors::RateLimited.new("429", retry_after: 1))
     instance = verifier_for(session)
     total = instance.run(cycles: 2, pace: false)
 
@@ -528,11 +528,11 @@ class VerifierTest < MinerTest
     # for good, in three minutes, and the corpus said so about a report that was true.
     session = fake_session([REPORTED])
     instance = verifier_for(session,
-      verdicts: { "0.28.1" => AgentsFyiMiner::Errors::MinerError.new("no wheel yet") })
+      verdicts: { "0.28.1" => AgentsMiner::Errors::MinerError.new("no wheel yet") })
     instance.one_cycle
 
-    record = AgentsFyiMiner::Ledger.load(instance.state).report(REPORTED["id"])
-    assert_equal AgentsFyiMiner::Ledger::FAILED, record.outcome
+    record = AgentsMiner::Ledger.load(instance.state).report(REPORTED["id"])
+    assert_equal AgentsMiner::Ledger::FAILED, record.outcome
     assert_operator record.next_at, :>, Time.now.to_f
 
     # The next cycle, inside the wait: the report is not even read from the corpus.
@@ -551,7 +551,7 @@ class VerifierTest < MinerTest
     # nothing was wrong — the corpus's own promotion latency, set by a number chosen for a
     # different job. The two loops share `Service`'s vocabulary, so a test has to say the waiting
     # is not shared with it.
-    assert_operator V::IDLE_SECONDS, :<, AgentsFyiMiner::Service::IDLE_SECONDS
+    assert_operator V::IDLE_SECONDS, :<, AgentsMiner::Service::IDLE_SECONDS
 
     # Two cycles, because the bound is tested before the wait: a one-cycle run stops without ever
     # reaching it.
@@ -559,7 +559,7 @@ class VerifierTest < MinerTest
     busy = verifier_for(fake_session([REPORTED]), state: @home + "busy.json")
     stub(busy, :wait, ->(seconds, pace:) { waits << seconds })
     busy.run(cycles: 2, pace: true)
-    assert_equal [AgentsFyiMiner::Service::CYCLE_SECONDS], waits
+    assert_equal [AgentsMiner::Service::CYCLE_SECONDS], waits
 
     idle_waits = []
     idle = verifier_for(fake_session([]), state: @home + "idle.json")
@@ -588,8 +588,8 @@ class VerifierTest < MinerTest
     session = fake_session(rows)
     instance = verifier_for(session, workers: 4)
 
-    original = AgentsFyiMiner::Ledger.instance_method(:record_report)
-    stub_method(AgentsFyiMiner::Ledger, :record_report,
+    original = AgentsMiner::Ledger.instance_method(:record_report)
+    stub_method(AgentsMiner::Ledger, :record_report,
       ->(receiver, report_id, **kwargs) {
         threads[Thread.current.object_id] = true
         original.bind_call(receiver, report_id, **kwargs)
@@ -639,22 +639,22 @@ class VerifierTest < MinerTest
     built = []
     session = fake_session([GEM_REPORT])
     instance = verifier_for(session)
-    claim = AgentsFyiMiner::Verifying.claim_for(GEM_REPORT)
+    claim = AgentsMiner::Verifying.claim_for(GEM_REPORT)
     stub(instance, :build_gem, lambda { |library, version|
       built << [library, version]
-      AgentsFyiMiner::RubyEnvs::Env.of(package: library, version: version, root: @home,
+      AgentsMiner::RubyEnvs::Env.of(package: library, version: version, root: @home,
         require_path: library)
     })
-    stub(AgentsFyiMiner::Verifying, :check, lambda { |got, _role, build:, suffix: ""|
+    stub(AgentsMiner::Verifying, :check, lambda { |got, _role, build:, suffix: ""|
       build.call(got.library, got.version)
       build.call(got.library, got.from_version)
-      verdict(AgentsFyiMiner::Ledger::REPRODUCED, "ran the reference")
+      verdict(AgentsMiner::Ledger::REPRODUCED, "ran the reference")
     })
 
     result, error = instance.send(:examine, claim, GEM_REPORT["id"])
 
     assert_nil error
-    assert_equal AgentsFyiMiner::Ledger::REPRODUCED, result.outcome
+    assert_equal AgentsMiner::Ledger::REPRODUCED, result.outcome
     assert claim.is_ruby?
     # Both releases of the gem, installed as gems — and nothing pip was asked for.
     assert_equal [%w[colorize 1.0.0], %w[colorize 0.8.1]], built
@@ -679,12 +679,12 @@ class VerifierTest < MinerTest
   def test_a_gem_claim_is_offered_to_the_checker_at_all
     # A gem report has an executable subject, so the verifier must not drop it as unanswerable —
     # which is what every Ruby report was before this round.
-    claim = AgentsFyiMiner::Verifying.claim_for(GEM_REPORT)
+    claim = AgentsMiner::Verifying.claim_for(GEM_REPORT)
 
     refute_nil claim
     assert claim.is_ruby?
     assert_equal "String.allocate.magenta", claim.reference
-    assert_equal true, AgentsFyiMiner::Verifying.needs_confirmation?(GEM_REPORT, "another-operator")
+    assert_equal true, AgentsMiner::Verifying.needs_confirmation?(GEM_REPORT, "another-operator")
   end
 
   def test_a_release_this_machine_cannot_build_is_charged_once
@@ -700,11 +700,11 @@ class VerifierTest < MinerTest
     rows = (1..3).map { |n| REPORTED.merge("id" => format("00000000-0000-0000-0000-0000000000b%d", n), "library" => "kornia") }
     session = fake_session(rows)
     attempts = []
-    stub(AgentsFyiMiner::Envs, :prune, ->(_home, budget: nil, quiet: nil) { [0, 0] })
+    stub(AgentsMiner::Envs, :prune, ->(_home, budget: nil, quiet: nil) { [0, 0] })
     store = @home + "ledger.json"
     instance = V.new(session: session, home: @home, state: store,
-      role: AgentsFyiMiner::Verifying::AS_REPORTED,
-      ledger: AgentsFyiMiner::Ledger.load(store),
+      role: AgentsMiner::Verifying::AS_REPORTED,
+      ledger: AgentsMiner::Ledger.load(store),
       # One worker, so the rule is deterministic: the first report to fail writes
       # the record and the others read it. With several, the ones already in flight
       # pay too — which is the bound, and it is the worker count rather than the
@@ -712,7 +712,7 @@ class VerifierTest < MinerTest
       workers: 1)
     stub(instance, :build, lambda { |library, version|
       attempts << [library, version]
-      raise AgentsFyiMiner::Errors::MinerError.new(
+      raise AgentsMiner::Errors::MinerError.new(
         "installing #{library} #{version} failed:\nFailed building wheel",
         permanent: true, release: "#{library} #{version}"
       )
@@ -736,13 +736,13 @@ class VerifierTest < MinerTest
     # wheel for the old Python is a question the newer image has gone back to asking; skipping on
     # the stale stamp means a release this machine *can* build is never built, once per report that
     # names it, for ever. The install must be attempted.
-    stub(AgentsFyiMiner::Envs, :prune, ->(_home, budget: nil, quiet: nil) { [0, 0] })
+    stub(AgentsMiner::Envs, :prune, ->(_home, budget: nil, quiet: nil) { [0, 0] })
     store = @home + "ledger.json"
     session = fake_session([REPORTED.merge("id" => "00000000-0000-0000-0000-0000000000c1",
       "library" => "kornia")])
     instance = V.new(session: session, home: @home, state: store,
-      role: AgentsFyiMiner::Verifying::AS_REPORTED,
-      ledger: AgentsFyiMiner::Ledger.load(store), workers: 1)
+      role: AgentsMiner::Verifying::AS_REPORTED,
+      ledger: AgentsMiner::Ledger.load(store), workers: 1)
     instance.ledger.record_release("kornia 0.28.1", "no wheel for the old interpreter")
     instance.ledger.release_interpreters["kornia 0.28.1"] = "cpython 1.0"
 
@@ -750,7 +750,7 @@ class VerifierTest < MinerTest
     stub(instance, :build, lambda { |library, version|
       attempts << [library, version]
       # Transient, so this attempt does not re-establish a permanent fact.
-      raise AgentsFyiMiner::Errors::MinerError.new("a bad minute building #{library} #{version}",
+      raise AgentsMiner::Errors::MinerError.new("a bad minute building #{library} #{version}",
         release: "")
     })
 
@@ -815,7 +815,7 @@ class VerifierTest < MinerTest
       "updated_at" => "2026-09-29T00:00:00Z",
       "status" => "resolved_unverified")
     session = fake_session(old + [newest])
-    instance = verifier_for(session, role: AgentsFyiMiner::Verifying::SEARCHED)
+    instance = verifier_for(session, role: AgentsMiner::Verifying::SEARCHED)
 
     instance.one_cycle
 

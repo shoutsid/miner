@@ -19,7 +19,7 @@ is a security matter.
 
 Please include:
 
-- the version (`agents-fyi-miner --version` or the image tag);
+- the version (`agents-miner --version` or the image tag);
 - the operating system, Ruby version, Python version and whether a compiler is present;
 - the command, mode and relevant flags;
 - what an attacker can do, and what they need to start with;

@@ -9,7 +9,7 @@ require_relative "test_helper"
 # checksum trailer — because the format belongs to a third party and a fixture invented beside
 # the reader would agree with whatever the reader does.
 class RubyIndexTest < MinerTest
-  INDEX = AgentsFyiMiner::RubyIndex
+  INDEX = AgentsMiner::RubyIndex
 
   # Verbatim from `https://index.rubygems.org/info/devise`.
   DEVISE = <<~DOCUMENT
@@ -26,16 +26,16 @@ class RubyIndexTest < MinerTest
 
   def teardown
     if @stubbed
-      AgentsFyiMiner::RubyVersions.singleton_class.alias_method(:fetch, :fetch_unstubbed)
-      AgentsFyiMiner::RubyVersions.singleton_class.remove_method(:fetch_unstubbed)
+      AgentsMiner::RubyVersions.singleton_class.alias_method(:fetch, :fetch_unstubbed)
+      AgentsMiner::RubyVersions.singleton_class.remove_method(:fetch_unstubbed)
       @stubbed = false
     end
     super
   end
 
   def stub_fetch(&block)
-    AgentsFyiMiner::RubyVersions.singleton_class.alias_method(:fetch_unstubbed, :fetch)
-    AgentsFyiMiner::RubyVersions.define_singleton_method(:fetch, &block)
+    AgentsMiner::RubyVersions.singleton_class.alias_method(:fetch_unstubbed, :fetch)
+    AgentsMiner::RubyVersions.define_singleton_method(:fetch, &block)
     @stubbed = true
   end
 
@@ -106,7 +106,7 @@ class RubyIndexTest < MinerTest
   # one it was.
   def test_a_gem_that_is_not_on_the_index_raises_with_the_code
     stub_fetch do |_url|
-      raise AgentsFyiMiner::RubyVersions::IndexError.new("https://index.rubygems.org/info/nope -> 404",
+      raise AgentsMiner::RubyVersions::IndexError.new("https://index.rubygems.org/info/nope -> 404",
         code: 404)
     end
 

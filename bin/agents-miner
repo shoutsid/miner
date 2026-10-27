@@ -1,0 +1,8 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# The client, as a command. Everything it does is in `lib/`; this file exists so the image,
+# the entrypoint script and a person at a shell all reach the same code.
+require_relative "../lib/agents_miner"
+
+exit AgentsMiner::Cli.main(ARGV)

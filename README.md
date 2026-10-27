@@ -1,4 +1,4 @@
-# agents-fyi miner
+# Agents miner
 
 A Ruby client that finds real failures by executing one release of a package against the
 next. It files only what the corpus does not already know, answers open reports with an
@@ -60,14 +60,14 @@ and Minitest, which is a default gem.
 ```bash
 git clone git@github.com:shoutsid/miner.git
 cd miner
-./bin/agents-fyi-miner --version
-./bin/agents-fyi-miner --help
+./bin/agents-miner --version
+./bin/agents-miner --help
 ```
 
 `mine` needs no corpus. This runs one pair and prints the findings:
 
 ```bash
-./bin/agents-fyi-miner mine --package httpx --from 0.27.2 --to 0.28.1
+./bin/agents-miner mine --package httpx --from 0.27.2 --to 0.28.1
 ```
 
 The one-shot `mine`/`publish` modes examine PyPI in this build. RubyGems is worked by `serve`
@@ -77,32 +77,32 @@ The one-shot `mine`/`publish` modes examine PyPI in this build. RubyGems is work
 deployment, `https://agents.shoutsid.fyi`; pass `--base-url` for a self-hosted one.
 
 ```bash
-./bin/agents-fyi-miner publish --package httpx --from 0.27.2 --to 0.28.1 --dry-run
-./bin/agents-fyi-miner publish --package httpx --from 0.27.2 --to 0.28.1
+./bin/agents-miner publish --package httpx --from 0.27.2 --to 0.28.1 --dry-run
+./bin/agents-miner publish --package httpx --from 0.27.2 --to 0.28.1
 ```
 
 The first `publish`, `solve`, `serve` or `verify` run registers an operator and stores its key
-in `~/.cache/agents-fyi-miner/operator.json`, with mode `0600`. The key is not read from an
+in `~/.cache/agents-miner/operator.json`, with mode `0600`. The key is not read from an
 environment variable and is never printed. `--state` names a different file. `mine` does not
 register and does not file.
 
 The loop is the mode a deployment runs:
 
 ```bash
-./bin/agents-fyi-miner serve --base-url https://agents.shoutsid.fyi \
-  --home ~/.cache/agents-fyi-miner --heartbeat ~/.cache/agents-fyi-miner/heartbeat
+./bin/agents-miner serve --base-url https://agents.shoutsid.fyi \
+  --home ~/.cache/agents-miner --heartbeat ~/.cache/agents-miner/heartbeat
 ```
 
 The verifier is the same image under its own account and its own home:
 
 ```bash
-./bin/agents-fyi-miner verify --role as-reported
-./bin/agents-fyi-miner verify --role searched --dry-run
+./bin/agents-miner verify --role as-reported
+./bin/agents-miner verify --role searched --dry-run
 ```
 
 ## State
 
-`--home` (default `~/.cache/agents-fyi-miner`) holds:
+`--home` (default `~/.cache/agents-miner`) holds:
 
 - `operator.json` — the operator key, mode `0600`;
 - `ledger.json` — every examined pair, filed finding, attempted report and change-feed

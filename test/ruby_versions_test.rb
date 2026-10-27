@@ -41,8 +41,8 @@ class RubyVersionsTest < MinerTest
     # The stub is process state, exactly as the monkeypatched `urlopen` was: a test that left one
     # in place would decide what a later test's fetch returns.
     if @fetch_stubbed
-      AgentsFyiMiner::RubyVersions.singleton_class.alias_method(:fetch, :fetch_unstubbed)
-      AgentsFyiMiner::RubyVersions.singleton_class.remove_method(:fetch_unstubbed)
+      AgentsMiner::RubyVersions.singleton_class.alias_method(:fetch, :fetch_unstubbed)
+      AgentsMiner::RubyVersions.singleton_class.remove_method(:fetch_unstubbed)
       @fetch_stubbed = false
     end
     super
@@ -99,7 +99,7 @@ class RubyVersionsTest < MinerTest
     # `2.4.0`, not `1.9.0`: a line is a major *and* minor here, the same rule the PyPI side uses.
     history = ["1.0.0", "1.9.0", "2.0.0", "2.4.0"]
 
-    assert_equal [AgentsFyiMiner::Pair.of(package: "rake", from_version: "2.0.0",
+    assert_equal [AgentsMiner::Pair.of(package: "rake", from_version: "2.0.0",
       to_version: "2.4.0")],
       versions.pairs_for("rake", history)
   end
@@ -134,7 +134,7 @@ class RubyVersionsTest < MinerTest
   def test_a_stale_cache_is_still_used_when_the_index_cannot_be_reached
     # A miner that stopped mining because RubyGems was briefly down would be trading a certain
     # loss for an uncertain one.
-    write("rake#{AgentsFyiMiner::RubyVersions::CACHE_SUFFIX}",
+    write("rake#{AgentsMiner::RubyVersions::CACHE_SUFFIX}",
       "fetched_at" => Time.now.to_f - (10 * 24 * 3600),
       "releases" => [{ "number" => "13.1.0", "prerelease" => false,
                        "created_at" => "2024-01-01T00:00:00Z" }])
@@ -147,17 +147,17 @@ class RubyVersionsTest < MinerTest
     # `NoHistory`, and not `Errno::ENOENT`: the refusal is a judgement about the ladder rather
     # than a syscall, and it is the name the PyPI ladder beside this one raises for the same
     # case. The CLI rescues both.
-    assert_raises(AgentsFyiMiner::RubyVersions::NoHistory) do
+    assert_raises(AgentsMiner::RubyVersions::NoHistory) do
       versions.release_history("rake", cache: @home, offline: true)
     end
   end
 
   def test_a_gem_the_index_has_never_heard_of_is_the_same_refusal
     stub_fetch do |url|
-      raise AgentsFyiMiner::RubyVersions::IndexError.new("#{url} -> 404", code: 404)
+      raise AgentsMiner::RubyVersions::IndexError.new("#{url} -> 404", code: 404)
     end
 
-    error = assert_raises(AgentsFyiMiner::RubyVersions::NoHistory) do
+    error = assert_raises(AgentsMiner::RubyVersions::NoHistory) do
       versions.release_history("never-heard-of-it", cache: @home)
     end
     assert_match(/is not on the index \(404\)/, error.message)
@@ -167,7 +167,7 @@ class RubyVersionsTest < MinerTest
     # The lesson the PyPI side paid for: a document that cannot say when its releases were
     # published is refreshed rather than trusted, or every release it holds is filed undated for as
     # long as the window lasts.
-    write("rake#{AgentsFyiMiner::RubyVersions::CACHE_SUFFIX}",
+    write("rake#{AgentsMiner::RubyVersions::CACHE_SUFFIX}",
       "fetched_at" => Time.now.to_f,
       "releases" => [{ "number" => "13.1.0", "prerelease" => false }])
     stub_fetch do |_url|
@@ -207,7 +207,7 @@ class RubyVersionsTest < MinerTest
 
   private
 
-  def versions = AgentsFyiMiner::RubyVersions
+  def versions = AgentsMiner::RubyVersions
 
   def stub_fetch(&block)
     versions.singleton_class.alias_method(:fetch_unstubbed, :fetch)

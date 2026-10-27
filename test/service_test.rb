@@ -18,13 +18,13 @@ require_relative "stub_helper"
 # adapter calling the real one, which needs an environment on disk and would fail on the probe
 # script's directory.
 class ServiceTest < MinerTest
-  Service = AgentsFyiMiner::Service
-  Errors = AgentsFyiMiner::Errors
-  Envs = AgentsFyiMiner::Envs
-  Ledger = AgentsFyiMiner::Ledger
-  Finding = AgentsFyiMiner::Finding
-  Mechanism = AgentsFyiMiner::Mechanism
-  Pair = AgentsFyiMiner::Pair
+  Service = AgentsMiner::Service
+  Errors = AgentsMiner::Errors
+  Envs = AgentsMiner::Envs
+  Ledger = AgentsMiner::Ledger
+  Finding = AgentsMiner::Finding
+  Mechanism = AgentsMiner::Mechanism
+  Pair = AgentsMiner::Pair
 
   include StubHelper
 
@@ -235,11 +235,11 @@ class ServiceTest < MinerTest
       test.deadlines << deadline
       Envs::Env.new(package: package, version: version, root: home + "#{package}-#{version}")
     end)
-    replace(AgentsFyiMiner::Versions, :release_history,
+    replace(AgentsMiner::Versions, :release_history,
       lambda do |package, cache: nil, offline: false, max_age: nil|
-        HISTORY.fetch(package) { raise AgentsFyiMiner::Versions::NoHistory, "no history for #{package}" }
+        HISTORY.fetch(package) { raise AgentsMiner::Versions::NoHistory, "no history for #{package}" }
       end)
-    replace(AgentsFyiMiner::Mine, :findings_between, ->(*_args, **_kwargs) { test.findings.dup })
+    replace(AgentsMiner::Mine, :findings_between, ->(*_args, **_kwargs) { test.findings.dup })
   end
 
   def teardown
@@ -304,7 +304,7 @@ class ServiceTest < MinerTest
   # reach the network.
   def cached_gem(home, package, releases)
     FileUtils.mkdir_p(home + "index")
-    (home + "index" + "#{package}#{AgentsFyiMiner::RubyVersions::CACHE_SUFFIX}").write(
+    (home + "index" + "#{package}#{AgentsMiner::RubyVersions::CACHE_SUFFIX}").write(
       JSON.generate(
         "releases" => Array.new(releases) do |index|
           { "number" => "1.0.#{index}", "ruby_version" => ">= 2.7.0", "prerelease" => false }
@@ -312,7 +312,7 @@ class ServiceTest < MinerTest
       )
     )
     lines = Array.new(releases) { |index| "1.0.#{index} rack:~> 1.0|checksum:aa,ruby:>= 2.7.0" }
-    (home + "index" + "#{package}#{AgentsFyiMiner::RubyIndex::CACHE_SUFFIX}").write(lines.join("\n"))
+    (home + "index" + "#{package}#{AgentsMiner::RubyIndex::CACHE_SUFFIX}").write(lines.join("\n"))
   end
 
   # --- the deadline the pricing decides ---------------------------------------------------
@@ -386,7 +386,7 @@ class ServiceTest < MinerTest
     # — and a null is permanent, so the value is asked for once at the moment it can still be stored
     # rather than written off as absence.
     asked = []
-    replace(AgentsFyiMiner::Versions, :release_history,
+    replace(AgentsMiner::Versions, :release_history,
       lambda do |package, cache: nil, offline: false, max_age: nil|
         asked << package
         # As the real one does, and it has to: a fake that assumed the directory existed would
@@ -589,7 +589,7 @@ class ServiceTest < MinerTest
     # A DNS blip while reading PyPI ended the process in production: the service restarted, and the
     # corpus stopped growing until somebody noticed. The index is a third party, and its being down is
     # a fact about one package.
-    replace(AgentsFyiMiner::Versions, :release_history,
+    replace(AgentsMiner::Versions, :release_history,
       lambda do |_package, cache: nil, offline: false, max_age: nil|
         raise SocketError, "[Errno -5] No address associated with hostname"
       end)
@@ -1039,7 +1039,7 @@ class ServiceTest < MinerTest
     # to get past it: the unreadable document is deliberately first in sorted order, and a walk that
     # stopped on it would spend every cycle here and never reach the gems behind it.
     FileUtils.mkdir_p(@home + "index")
-    (@home + "index" + "aaa-unreadable-gem#{AgentsFyiMiner::RubyVersions::CACHE_SUFFIX}").write(
+    (@home + "index" + "aaa-unreadable-gem#{AgentsMiner::RubyVersions::CACHE_SUFFIX}").write(
       "not a document at all"
     )
     cached_gem(@home, "real-gem", 2)
@@ -1077,7 +1077,7 @@ class ServiceTest < MinerTest
     assert_equal 1, sent.length
     assert_equal "ruby", sent.first[1]
     assert_equal "rack", sent.first[2].first.fetch("library")
-    assert_equal ["rack"], miner.leads_for(AgentsFyiMiner::Ecosystems::RUBY).keys
+    assert_equal ["rack"], miner.leads_for(AgentsMiner::Ecosystems::RUBY).keys
 
     miner.refresh_advisories(stats, now: 200.0)
     assert_equal 1, session.calls.count { |call| call.first == "advisories" }
@@ -1089,11 +1089,11 @@ class ServiceTest < MinerTest
     session = FakeSession.new(one_page)
     miner = ruby_miner(session)
 
-    with_stub(AgentsFyiMiner::Advisories, :fetch_page, ->(_url) { raise SocketError, "no route" }) do
+    with_stub(AgentsMiner::Advisories, :fetch_page, ->(_url) { raise SocketError, "no route" }) do
       stats = Service::Stats.new
       miner.refresh_advisories(stats, now: 1.0)
 
-      assert_empty miner.leads_for(AgentsFyiMiner::Ecosystems::RUBY)
+      assert_empty miner.leads_for(AgentsMiner::Ecosystems::RUBY)
       assert_equal 0, session.calls.count { |call| call.first == "advisories" }
     end
   end
@@ -1113,7 +1113,7 @@ class ServiceTest < MinerTest
 
     miner.refresh_advisories(Service::Stats.new, now: 1.0)
 
-    assert_equal ["rack"], miner.leads_for(AgentsFyiMiner::Ecosystems::RUBY).keys
+    assert_equal ["rack"], miner.leads_for(AgentsMiner::Ecosystems::RUBY).keys
   end
 
   # **A read that failed is not a read that happened.** A transient refusal must not suppress the
@@ -1125,9 +1125,9 @@ class ServiceTest < MinerTest
     miner = ruby_miner(FakeSession.new(one_page))
     fetches = 0
 
-    with_stub(AgentsFyiMiner::Advisories, :fetch_page, lambda { |_url|
+    with_stub(AgentsMiner::Advisories, :fetch_page, lambda { |_url|
       fetches += 1
-      raise AgentsFyiMiner::Advisories::IndexError.new("rate limited", code: 403)
+      raise AgentsMiner::Advisories::IndexError.new("rate limited", code: 403)
     }) do
       miner.refresh_advisories(Service::Stats.new, now: 1_000.0)
       first = fetches
@@ -1150,6 +1150,6 @@ class ServiceTest < MinerTest
   # A service mining RubyGems, which is the one index the reviewed advisories are read for.
   def ruby_miner(session)
     Service.new(session: session, home: @home, state: @home + "ledger.json",
-      watchlist: [], ledger: Ledger.new, ecosystems: [AgentsFyiMiner::Ecosystems::RUBY])
+      watchlist: [], ledger: Ledger.new, ecosystems: [AgentsMiner::Ecosystems::RUBY])
   end
 end

@@ -9,7 +9,7 @@ require_relative "test_helper"
 # deployment. The third thing here — what `reconcile` does to a cursor — is the rule that makes a
 # process answer questions that were asked before it started.
 class FeedTest < MinerTest
-  F = AgentsFyiMiner::Feed
+  F = AgentsMiner::Feed
 
   # The corpus client, answering one page of changes and nothing else. `pages` is a list so a test
   # can drive a multi-page walk, and it stops answering once it runs out — which is what makes a
@@ -29,7 +29,7 @@ class FeedTest < MinerTest
     end
   end
 
-  def ledger = AgentsFyiMiner::Ledger.new
+  def ledger = AgentsMiner::Ledger.new
 
   def test_the_backlog_walk_alternates_oldest_and_newest
     # A reader that takes only from the front reaches today's reports after every old one, and the

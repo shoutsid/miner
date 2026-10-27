@@ -15,7 +15,7 @@ require_relative "test_helper"
 class VerifyingTest < MinerTest
   include StubHelper
 
-  V = AgentsFyiMiner::Verifying
+  V = AgentsMiner::Verifying
 
   def refusal(name, parameter)
     "Traceback (most recent call last):\n  " \
@@ -82,16 +82,16 @@ class VerifyingTest < MinerTest
         @answers[[env.version, "dotted", dotted]] || ""
       end,
       inventory: ->(env, suffix: "") do
-        AgentsFyiMiner::Envs::Inventory.new(
+        AgentsMiner::Envs::Inventory.new(
           module: @answers["module"] || "pkg",
           entries: @answers[[env.version, "inventory"]] || []
         )
       end
     }
     builder = lambda do |library, version|
-      AgentsFyiMiner::Envs::Env.new(package: library, version: version, root: @home)
+      AgentsMiner::Envs::Env.new(package: library, version: version, root: @home)
     end
-    with_stubs(AgentsFyiMiner::Envs, probes) { yield builder }
+    with_stubs(AgentsMiner::Envs, probes) { yield builder }
   end
 
   # --- reading a report ---------------------------------------------------------------------
@@ -222,7 +222,7 @@ class VerifyingTest < MinerTest
     }
     verdict = scripted(answers) { |build| V.as_reported(V.claim_for(ARGUMENT_REPORT), build: build) }
 
-    assert_equal AgentsFyiMiner::Ledger::REPRODUCED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::REPRODUCED, verdict.outcome
     assert_includes verdict.executed, "transport"
   end
 
@@ -236,7 +236,7 @@ class VerifyingTest < MinerTest
     }
     verdict = scripted(answers) { |build| V.as_reported(V.claim_for(ARGUMENT_REPORT), build: build) }
 
-    assert_equal AgentsFyiMiner::Ledger::PARTIAL, verdict.outcome
+    assert_equal AgentsMiner::Ledger::PARTIAL, verdict.outcome
     assert_includes verdict.executed, "not accepted there either"
   end
 
@@ -245,7 +245,7 @@ class VerifyingTest < MinerTest
                 ["0.28.1", "call", "AsyncClient", "app"] => "ran fine" }
     verdict = scripted(answers) { |build| V.as_reported(V.claim_for(ARGUMENT_REPORT), build: build) }
 
-    assert_equal AgentsFyiMiner::Ledger::DISSENTED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::DISSENTED, verdict.outcome
   end
 
   def test_a_removal_is_confirmed_by_the_older_release_accepting_the_argument
@@ -260,7 +260,7 @@ class VerifyingTest < MinerTest
     }
     verdict = scripted(answers) { |build| V.as_reported(V.claim_for(report), build: build) }
 
-    assert_equal AgentsFyiMiner::Ledger::REPRODUCED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::REPRODUCED, verdict.outcome
     assert_includes verdict.executed, "accepted the argument"
   end
 
@@ -273,7 +273,7 @@ class VerifyingTest < MinerTest
     }
     verdict = scripted(answers) { |build| V.as_reported(V.claim_for(report), build: build) }
 
-    assert_equal AgentsFyiMiner::Ledger::DISSENTED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::DISSENTED, verdict.outcome
     assert_includes verdict.executed, "nothing was taken away"
   end
 
@@ -288,7 +288,7 @@ class VerifyingTest < MinerTest
     }
     verdict = scripted(answers) { |build| V.as_reported(V.claim_for(ARGUMENT_REPORT), build: build) }
 
-    assert_equal AgentsFyiMiner::Verifying::NO_CLAIM, verdict.outcome
+    assert_equal AgentsMiner::Verifying::NO_CLAIM, verdict.outcome
     assert verdict.unreachable, "a probe that did not run has to be marked, not settled"
     refute verdict.vote?
   end
@@ -304,7 +304,7 @@ class VerifyingTest < MinerTest
       V.reference(V.claim_for(SYMBOL_REPORT), build: build)
     end
 
-    assert_equal AgentsFyiMiner::Ledger::DISSENTED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::DISSENTED, verdict.outcome
     assert_includes verdict.executed, "still exports the name"
   end
 
@@ -328,7 +328,7 @@ class VerifyingTest < MinerTest
       V.reference(V.claim_for(report), build: build)
     end
 
-    assert_equal AgentsFyiMiner::Ledger::DISSENTED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::DISSENTED, verdict.outcome
     assert_includes verdict.executed, "already gone"
   end
 
@@ -342,7 +342,7 @@ class VerifyingTest < MinerTest
     }
     verdict = scripted(answers) { |build| V.as_reported(V.claim_for(ARGUMENT_REPORT), build: build) }
 
-    assert_equal AgentsFyiMiner::Ledger::REPRODUCED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::REPRODUCED, verdict.outcome
     assert_includes verdict.executed, "could not be run"
   end
 
@@ -381,10 +381,10 @@ class VerifyingTest < MinerTest
   # --- the payload -----------------------------------------------------------------------------
 
   def test_the_payload_carries_the_execution_and_the_releases_it_ran_against
-    verdict = V::Verdict.of(outcome: AgentsFyiMiner::Ledger::REPRODUCED, executed: "ran the call")
+    verdict = V::Verdict.of(outcome: AgentsMiner::Ledger::REPRODUCED, executed: "ran the call")
     payload = V.payload(verdict, V.claim_for(ARGUMENT_REPORT), V::AS_REPORTED)
 
-    assert_equal AgentsFyiMiner::Ledger::REPRODUCED, payload["outcome"]
+    assert_equal AgentsMiner::Ledger::REPRODUCED, payload["outcome"]
     assert_equal "ran the call", payload["notes"]
     assert_includes payload["environment"], "httpx 0.27.2 and httpx 0.28.1"
     assert_includes payload["environment"], "verified by executing against"
@@ -393,6 +393,6 @@ class VerifyingTest < MinerTest
 
   def test_a_verdict_that_is_not_a_vote_is_not_counted_as_one
     refute V::Verdict.of(outcome: V::NO_CLAIM, unreachable: true).vote?
-    assert V::Verdict.of(outcome: AgentsFyiMiner::Ledger::PARTIAL).vote?
+    assert V::Verdict.of(outcome: AgentsMiner::Ledger::PARTIAL).vote?
   end
 end

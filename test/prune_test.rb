@@ -4,7 +4,7 @@ require_relative "test_helper"
 
 # Keeping the environment cache bounded, which is what stops a disk-full outage.
 class PruneTest < MinerTest
-  E = AgentsFyiMiner::Envs
+  E = AgentsMiner::Envs
   MB = 1024 * 1024
 
   # A directory that looks like a built environment of a given size.

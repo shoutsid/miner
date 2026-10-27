@@ -124,9 +124,9 @@ written twice would be one opinion. A verifier whose environment could not be bu
 ## Code map
 
 ```text
-bin/agents-fyi-miner             the one entry point
-lib/agents_fyi_miner.rb          the loader
-lib/agents_fyi_miner/
+bin/agents-miner             the one entry point
+lib/agents_miner.rb          the loader
+lib/agents_miner/
   cli.rb                         modes, flags, exit status
   service.rb                     the durable loop
   verifier.rb                    the verification loop

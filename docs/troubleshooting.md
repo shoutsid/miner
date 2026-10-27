@@ -5,14 +5,14 @@ work, `2` is a usage refusal, and `3` (from `serve`) means every requested index
 
 ## The command does not start
 
-### `agents-fyi-miner: error: ... (choose from mine, publish, solve, serve, verify)`
+### `agents-miner: error: ... (choose from mine, publish, solve, serve, verify)`
 
 An unknown command or flag. `--help` lists the five commands and every flag. A leading flag is
 not a command.
 
 ### `the following arguments are required: command`
 
-No command was given. `agents-fyi-miner --help` is the exception; it prints usage.
+No command was given. `agents-miner --help` is the exception; it prints usage.
 
 ### `argument --role: invalid choice`
 

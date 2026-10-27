@@ -30,12 +30,12 @@ services:
     environment:
       API_BASE_URL: http://service:8001
       MINER_MODE: serve
-      MINER_HOME: /home/miner/.cache/agents-fyi-miner
+      MINER_HOME: /home/miner/.cache/agents-miner
       MINER_ECOSYSTEMS: ruby
       MINER_BUDGET: "24"
       MINER_WORKERS: "6"
     volumes:
-      - miner_cache:/home/miner/.cache/agents-fyi-miner
+      - miner_cache:/home/miner/.cache/agents-miner
       - pip_cache:/home/miner/.cache/pip
     read_only: true
     tmpfs:
@@ -49,11 +49,11 @@ services:
     environment:
       API_BASE_URL: http://service:8001
       MINER_MODE: verify
-      MINER_HOME: /home/miner/.cache/agents-fyi-verifier
+      MINER_HOME: /home/miner/.cache/agents-verifier
       VERIFIER_ROLE: as-reported
       VERIFIER_BUDGET: "24"
     volumes:
-      - verifier_cache:/home/miner/.cache/agents-fyi-verifier
+      - verifier_cache:/home/miner/.cache/agents-verifier
       - pip_cache:/home/miner/.cache/pip
     read_only: true
     tmpfs:
@@ -75,9 +75,9 @@ ones that must survive a change to them.
 
 | Volume | Mount | What it holds |
 |---|---|---|
-| `miner_cache` | `/home/miner/.cache/agents-fyi-miner` | miner state, environments and ledger |
-| `verifier_cache` | `/home/miner/.cache/agents-fyi-verifier` | as-reported verifier state and environments |
-| `verifier_independent_cache` | `/home/miner/.cache/agents-fyi-verifier-independent` | searched verifier state and environments |
+| `miner_cache` | `/home/miner/.cache/agents-miner` | miner state, environments and ledger |
+| `verifier_cache` | `/home/miner/.cache/agents-verifier` | as-reported verifier state and environments |
+| `verifier_independent_cache` | `/home/miner/.cache/agents-verifier-independent` | searched verifier state and environments |
 | `pip_cache` | `/home/miner/.cache/pip` | pip's downloaded wheels, shared by all three |
 
 **The wheel cache is shared; the environments are not.** A wheel is an artifact the index
@@ -119,7 +119,7 @@ The image's healthcheck is the age of the heartbeat the loop touches once per cy
 the Ruby already in the image; nothing is installed to probe a file.
 
 ```text
-ruby -e "p='/home/miner/.cache/agents-fyi-miner/heartbeat'; exit(File.exist?(p) && (Time.now - File.mtime(p)) < 5400 ? 0 : 1)"
+ruby -e "p='/home/miner/.cache/agents-miner/heartbeat'; exit(File.exist?(p) && (Time.now - File.mtime(p)) < 5400 ? 0 : 1)"
 ```
 
 The two verifiers touch their own files (`heartbeat-as-reported`, `heartbeat-searched`), so a

@@ -10,9 +10,9 @@ require_relative "test_helper"
 # history, so what is asserted is which work came back and which reasons came with it. What is
 # asserted is the same, branch for branch.
 class PlannerTest < MinerTest
-  L = AgentsFyiMiner::Ledger
-  P = AgentsFyiMiner::Planner
-  V = AgentsFyiMiner::Versions
+  L = AgentsMiner::Ledger
+  P = AgentsMiner::Planner
+  V = AgentsMiner::Versions
 
   HISTORY = {
     "httpx" => %w[0.26.0 0.27.0 0.27.2 0.28.0 0.28.1],
@@ -33,7 +33,7 @@ class PlannerTest < MinerTest
   def history_for(package, refresh: true)
     @fetches << package if refresh
     unless HISTORY.key?(package)
-      raise AgentsFyiMiner::Versions::NoHistory, "#{package} is not on the index (404)"
+      raise AgentsMiner::Versions::NoHistory, "#{package} is not on the index (404)"
     end
 
     HISTORY[package]
@@ -522,7 +522,7 @@ class PlannerTest < MinerTest
 
         # What `release_history` does offline with nothing on disk: there is no cached history,
         # and the plan allowed itself no fetch to fill one.
-        raise AgentsFyiMiner::Versions::NoHistory, "#{package} has no cached history"
+        raise AgentsMiner::Versions::NoHistory, "#{package} has no cached history"
       },
       now: 1_000.0, budget: 1, max_fetches: 0, cache_has: ->(_package) { false }
     )
@@ -557,7 +557,7 @@ class PlannerTest < MinerTest
       reports: [], watchlist: [], ledger: L.new, now: 0.0,
       history_for: ->(package, refresh: true) { history.fetch(package) },
       leads: { "rack" => [lead("GHSA-aaaa-bbbb-cccc", "high", "2.2.6.1")] },
-      advisory_of: AgentsFyiMiner::Ecosystems::RUBY.method(:advisory_pair)
+      advisory_of: AgentsMiner::Ecosystems::RUBY.method(:advisory_pair)
     )
 
     assert_equal [["2.2.6", "2.2.6.1"]],
@@ -574,7 +574,7 @@ class PlannerTest < MinerTest
       reports: [], watchlist: [], ledger: L.new, now: 0.0, per_package: 100, budget: 100,
       history_for: ->(package, refresh: true) { history.fetch(package) },
       leads: { "big" => [lead("GHSA-aaaa-bbbb-cccc", "high", "1.2.0")] },
-      advisory_of: AgentsFyiMiner::Ecosystems::RUBY.method(:advisory_pair)
+      advisory_of: AgentsMiner::Ecosystems::RUBY.method(:advisory_pair)
     )
 
     pairs = chosen.pairs.map { |pair| [pair.from_version, pair.to_version] }
@@ -591,7 +591,7 @@ class PlannerTest < MinerTest
       reports: [], watchlist: [], ledger: L.new, now: 0.0,
       history_for: ->(package, refresh: true) { history.fetch(package) },
       leads: { "rack" => [lead("GHSA-aaaa-bbbb-cccc", "high", "2.0.0")] },
-      advisory_of: AgentsFyiMiner::Ecosystems::RUBY.method(:advisory_pair)
+      advisory_of: AgentsMiner::Ecosystems::RUBY.method(:advisory_pair)
     )
 
     assert_equal [["1.9.9", "2.0.0"]],
@@ -606,7 +606,7 @@ class PlannerTest < MinerTest
       reports: [report], watchlist: [], ledger: L.new, now: 0.0, per_package: 1, budget: 1,
       history_for: ->(package, refresh: true) { history.fetch(package) },
       leads: { "rack" => [lead("GHSA-aaaa-bbbb-cccc", "critical", "2.2.6.1")] },
-      advisory_of: AgentsFyiMiner::Ecosystems::RUBY.method(:advisory_pair)
+      advisory_of: AgentsMiner::Ecosystems::RUBY.method(:advisory_pair)
     )
 
     assert_equal ["sqlalchemy"], chosen.pairs.map(&:package)

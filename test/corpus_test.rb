@@ -14,7 +14,7 @@ class CorpusTest < MinerTest
 
     attr_reader :calls
 
-    def call(method:, url:, body: nil, headers: {}, timeout: AgentsFyiMiner::Http::TIMEOUT)
+    def call(method:, url:, body: nil, headers: {}, timeout: AgentsMiner::Http::TIMEOUT)
       (@calls ||= []) << { method: method, url: url, body: body, headers: headers,
                            timeout: timeout }
       @handler.call(method: method, url: url, body: body)
@@ -25,7 +25,7 @@ class CorpusTest < MinerTest
   # build a response per request — the paging test below answers three requests with three
   # different bodies — where `answer` is one whole client that always says the same thing.
   def response(status: 200, body: "", headers: {})
-    AgentsFyiMiner::Http::Response.new(status: status, body: body, headers: headers)
+    AgentsMiner::Http::Response.new(status: status, body: body, headers: headers)
   end
 
   def answer(status: 200, body: "", headers: {})
@@ -37,17 +37,17 @@ class CorpusTest < MinerTest
   end
 
   def offline(message = "no route to host")
-    FakeHttp.new { |**_kwargs| raise AgentsFyiMiner::Http::Unreachable, message }
+    FakeHttp.new { |**_kwargs| raise AgentsMiner::Http::Unreachable, message }
   end
 
-  def client(http, base_url: "http://x") = AgentsFyiMiner::Corpus.new(base_url:, api_key: "k", http:)
+  def client(http, base_url: "http://x") = AgentsMiner::Corpus.new(base_url:, api_key: "k", http:)
 
   # The quota is the service's own protection. A client that retried through it would be the
   # reason it needed one, so the wait is read and honoured.
   def test_a_429_carries_the_wait_rather_than_being_a_generic_error
     http = answer(status: 429, body: "slow down", headers: { "retry-after" => "300" })
 
-    error = assert_raises(AgentsFyiMiner::Errors::RateLimited) { client(http).submit({}) }
+    error = assert_raises(AgentsMiner::Errors::RateLimited) { client(http).submit({}) }
 
     assert_equal 300.0, error.retry_after
     assert_equal "POST", http.calls.first[:method]
@@ -77,15 +77,15 @@ class CorpusTest < MinerTest
   def test_a_429_with_no_wait_is_still_waited_for
     http = answer(status: 429, body: "")
 
-    error = assert_raises(AgentsFyiMiner::Errors::RateLimited) { client(http).submit({}) }
+    error = assert_raises(AgentsMiner::Errors::RateLimited) { client(http).submit({}) }
 
-    assert_equal AgentsFyiMiner::Errors::RETRY_AFTER_FALLBACK, error.retry_after
+    assert_equal AgentsMiner::Errors::RETRY_AFTER_FALLBACK, error.retry_after
   end
 
   # A service meets a network that is down, and the difference between a refusal and an
   # outage is only what the caller does next.
   def test_an_unreachable_corpus_is_a_failure_the_caller_can_retry
-    error = assert_raises(AgentsFyiMiner::Errors::CorpusError) { client(offline).changes }
+    error = assert_raises(AgentsMiner::Errors::CorpusError) { client(offline).changes }
 
     assert_includes error.message, "could not be reached"
     refute error.permanent?, "an outage is the corpus being unavailable, not refusing"
@@ -94,9 +94,9 @@ class CorpusTest < MinerTest
   def test_a_refusal_that_is_not_a_quota_is_not_a_rate_limit
     http = answer(status: 422, body: "missing library")
 
-    error = assert_raises(AgentsFyiMiner::Errors::CorpusError) { client(http).submit({}) }
+    error = assert_raises(AgentsMiner::Errors::CorpusError) { client(http).submit({}) }
 
-    refute_kind_of AgentsFyiMiner::Errors::RateLimited, error
+    refute_kind_of AgentsMiner::Errors::RateLimited, error
     assert error.permanent?, "a 4xx is the same request being declined again"
   end
 
@@ -177,10 +177,10 @@ class CorpusTest < MinerTest
     )
     http = answer(status: 503, body: body, headers: { "retry-after" => "900" })
 
-    error = assert_raises(AgentsFyiMiner::Errors::CollectionPaused) { client(http).submit({}) }
+    error = assert_raises(AgentsMiner::Errors::CollectionPaused) { client(http).submit({}) }
 
     assert_equal 900.0, error.retry_after
-    refute_kind_of AgentsFyiMiner::Errors::RateLimited, error
+    refute_kind_of AgentsMiner::Errors::RateLimited, error
     # A pause is not the corpus declining this request: nothing is settled, and the same
     # request is what should happen later.
     refute error.permanent?
@@ -195,9 +195,9 @@ class CorpusTest < MinerTest
     body = JSON.generate("error" => { "type" => "unavailable", "message" => "Retry shortly." })
     http = answer(status: 503, body: body)
 
-    error = assert_raises(AgentsFyiMiner::Errors::CorpusError) { client(http).submit({}) }
+    error = assert_raises(AgentsMiner::Errors::CorpusError) { client(http).submit({}) }
 
-    refute_kind_of AgentsFyiMiner::Errors::CollectionPaused, error
+    refute_kind_of AgentsMiner::Errors::CollectionPaused, error
     refute error.permanent?, "a 5xx is the corpus being unavailable"
   end
 
@@ -219,12 +219,12 @@ class CorpusTest < MinerTest
       "next_step" => "Resume it with `POST /api/admin/collection/python/resume`."
     })
 
-    error = assert_raises(AgentsFyiMiner::Errors::CollectionPaused) do
+    error = assert_raises(AgentsMiner::Errors::CollectionPaused) do
       client(http, base_url: "http://service:8001").mining_targets(limit: 10, ecosystem: "python")
     end
 
     assert_equal "python", error.ecosystem
-    assert_equal AgentsFyiMiner::Errors::PAUSE_FALLBACK, error.retry_after
+    assert_equal AgentsMiner::Errors::PAUSE_FALLBACK, error.retry_after
     assert_includes error.message, "Ruby is being brought up first"
     assert_includes error.message, "POST /api/admin/collection/python/resume"
   end
@@ -255,10 +255,10 @@ class CorpusTest < MinerTest
     http = answer_json({ "api_key" => "secret" }, status: 201)
     state = @home + "operator.json"
 
-    first = AgentsFyiMiner::Corpus.load_or_register("http://x", state,
+    first = AgentsMiner::Corpus.load_or_register("http://x", state,
       name: "miner", email: "miner@example.test",
       http: http)
-    second = AgentsFyiMiner::Corpus.load_or_register("http://x", state,
+    second = AgentsMiner::Corpus.load_or_register("http://x", state,
       name: "miner", email: "miner@example.test",
       http: http)
 

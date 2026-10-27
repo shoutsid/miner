@@ -13,7 +13,7 @@ require_relative "stub_helper"
 class AdvisoriesTest < MinerTest
   include StubHelper
 
-  A = AgentsFyiMiner::Advisories
+  A = AgentsMiner::Advisories
 
   def advisory(**overrides)
     {

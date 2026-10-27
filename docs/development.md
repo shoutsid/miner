@@ -34,9 +34,9 @@ every shell script. The image job builds the Dockerfile and runs `--help` inside
 ## Layout
 
 ```text
-bin/agents-fyi-miner             the one entry point
-lib/agents_fyi_miner.rb          the loader
-lib/agents_fyi_miner/            the client
+bin/agents-miner             the one entry point
+lib/agents_miner.rb          the loader
+lib/agents_miner/            the client
   cli.rb                         commands, flags and exit status
   service.rb                     the durable loop
   verifier.rb                    the verifier loop
@@ -122,7 +122,7 @@ gem is a design change, not a convenience.
 
 ## Release process
 
-1. Update `lib/agents_fyi_miner.rb`'s `VERSION` and `CHANGELOG.md`.
+1. Update `lib/agents_miner.rb`'s `VERSION` and `CHANGELOG.md`.
 2. Run `ruby -Ilib -Itest test/all_test.rb`.
 3. Run the service's contract suite if this checkout is the submodule.
 4. Commit, tag `vX.Y.Z`, push the tag. The release workflow builds the image and publishes it

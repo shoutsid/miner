@@ -57,12 +57,12 @@ jobs:
           context: .
           file: ./Dockerfile
           load: true
-          tags: agentsfyi-miner:ci
+          tags: agents-miner:ci
           cache-from: type=gha,scope=miner
           cache-to: type=gha,mode=max,scope=miner
 
       - name: The image runs the Ruby client
-        run: docker run --rm --entrypoint ruby agentsfyi-miner:ci /app/bin/agents-fyi-miner --version
+        run: docker run --rm --entrypoint ruby agents-miner:ci /app/bin/agents-miner --version
 
       - name: The image can print usage without a service
-        run: docker run --rm --entrypoint ruby agentsfyi-miner:ci /app/bin/agents-fyi-miner --help
+        run: docker run --rm --entrypoint ruby agents-miner:ci /app/bin/agents-miner --help

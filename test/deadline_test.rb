@@ -16,7 +16,7 @@ require_relative "test_helper"
 # was made by downloading into a working deployment, which is exactly what this module's caller
 # must not have to do to be trusted.
 class DeadlineTest < MinerTest
-  E = AgentsFyiMiner::Envs
+  E = AgentsMiner::Envs
   MB = 1024 * 1024
 
   def test_a_release_of_unknown_size_keeps_the_flat_timeout

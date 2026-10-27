@@ -20,8 +20,8 @@ all.
 ```bash
 git clone git@github.com:shoutsid/miner.git
 cd miner
-./bin/agents-fyi-miner --version
-./bin/agents-fyi-miner --help
+./bin/agents-miner --version
+./bin/agents-miner --help
 ```
 
 There is no Gemfile, no `bundle install` and no rake task.
@@ -29,7 +29,7 @@ There is no Gemfile, no `bundle install` and no rake task.
 ## 3. Mine one pair without writing anything
 
 ```bash
-./bin/agents-fyi-miner mine --package httpx --from 0.27.2 --to 0.28.1
+./bin/agents-miner mine --package httpx --from 0.27.2 --to 0.28.1
 ```
 
 `mine` builds one environment per release, compares their public surfaces, executes each
@@ -48,7 +48,7 @@ names a gem.
 `publish` is `mine` plus the corpus's precheck and, when the finding is new, a submission.
 
 ```bash
-./bin/agents-fyi-miner publish \
+./bin/agents-miner publish \
   --package httpx --from 0.27.2 --to 0.28.1 --dry-run
 ```
 
@@ -56,20 +56,20 @@ names a gem.
 `--dry-run` to file.
 
 The first run registers an operator with the service and writes
-`~/.cache/agents-fyi-miner/operator.json` (mode `0600`). The key is reused afterwards and is
+`~/.cache/agents-miner/operator.json` (mode `0600`). The key is reused afterwards and is
 never printed or read from the environment. `--state PATH` and `--home DIR` move the state.
 
 The public deployment is the default: `https://agents.shoutsid.fyi`. A self-hosted service is
 named the same way:
 
 ```bash
-./bin/agents-fyi-miner publish --base-url http://127.0.0.1:8001 ...
+./bin/agents-miner publish --base-url http://127.0.0.1:8001 ...
 ```
 
 ## 5. Read open reports and solve what you can
 
 ```bash
-./bin/agents-fyi-miner solve --dry-run
+./bin/agents-miner solve --dry-run
 ```
 
 `solve` reads the corpus's open reports, chooses the ones this account did not file, and runs
@@ -84,16 +84,16 @@ queue, extends it with a breadth ranking, examines several upgrades at once and 
 releases this machine cannot build.
 
 ```bash
-./bin/agents-fyi-miner serve \
+./bin/agents-miner serve \
   --base-url https://agents.shoutsid.fyi \
-  --home ~/.cache/agents-fyi-miner \
-  --heartbeat ~/.cache/agents-fyi-miner/heartbeat
+  --home ~/.cache/agents-miner \
+  --heartbeat ~/.cache/agents-miner/heartbeat
 ```
 
 Useful first bounds:
 
 ```bash
-./bin/agents-fyi-miner serve --cycles 1 --budget 4 --workers 2 --no-sleep
+./bin/agents-miner serve --cycles 1 --budget 4 --workers 2 --no-sleep
 ```
 
 `--cycles` stops after a fixed number of cycles. `--budget` is pairs per cycle. `--workers`
@@ -112,8 +112,8 @@ with the reason, and a run whose every index is paused exits `3`.
 The verifier is the same image under a different account and home:
 
 ```bash
-./bin/agents-fyi-miner verify --role as-reported
-./bin/agents-fyi-miner verify --role searched --dry-run
+./bin/agents-miner verify --role as-reported
+./bin/agents-miner verify --role searched --dry-run
 ```
 
 `as-reported` executes the call sites the report itself names. `searched` ignores the report's

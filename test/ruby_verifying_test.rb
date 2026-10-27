@@ -18,8 +18,8 @@ require_relative "test_helper"
 class RubyVerifyingTest < MinerTest
   include StubHelper
 
-  V = AgentsFyiMiner::Verifying
-  R = AgentsFyiMiner::RubyEnvs
+  V = AgentsMiner::Verifying
+  R = AgentsMiner::RubyEnvs
 
   GEM_REPORT = {
     "id" => "00000000-0000-0000-0000-000000000003",
@@ -126,7 +126,7 @@ class RubyVerifyingTest < MinerTest
       V.check(V.claim_for(GEM_REPORT), V::AS_REPORTED, build: build)
     end
 
-    assert_equal AgentsFyiMiner::Ledger::DISSENTED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::DISSENTED, verdict.outcome
     assert_includes verdict.executed, "still defines the name"
   end
 
@@ -152,7 +152,7 @@ class RubyVerifyingTest < MinerTest
       V.check(V.claim_for(GEM_REPORT), V::AS_REPORTED, build: build)
     end
 
-    assert_equal AgentsFyiMiner::Ledger::REPRODUCED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::REPRODUCED, verdict.outcome
     assert_includes verdict.executed, "resolved before and raising now"
   end
 
@@ -165,7 +165,7 @@ class RubyVerifyingTest < MinerTest
       V.check(V.claim_for(GEM_REPORT), V::AS_REPORTED, build: build)
     end
 
-    assert_equal AgentsFyiMiner::Ledger::DISSENTED, verdict.outcome
+    assert_equal AgentsMiner::Ledger::DISSENTED, verdict.outcome
     assert_includes verdict.executed, "already gone"
   end
 
@@ -195,12 +195,12 @@ class RubyVerifyingTest < MinerTest
     }
     verdict = scripted(answers) { |build| V.check(V.claim_for(report), V::AS_REPORTED, build: build) }
 
-    assert_equal AgentsFyiMiner::Ledger::PARTIAL, verdict.outcome
+    assert_equal AgentsMiner::Ledger::PARTIAL, verdict.outcome
     assert_includes verdict.executed, "did not resolve"
   end
 
   def test_the_payload_names_the_two_releases_and_the_method
-    verdict = V::Verdict.of(outcome: AgentsFyiMiner::Ledger::REPRODUCED, executed: "ran it")
+    verdict = V::Verdict.of(outcome: AgentsMiner::Ledger::REPRODUCED, executed: "ran it")
     payload = V.payload(verdict, V.claim_for(GEM_REPORT), V::SEARCHED)
 
     assert_equal "ran it", payload["notes"]

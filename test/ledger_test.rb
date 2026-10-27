@@ -8,7 +8,7 @@ require_relative "test_helper"
 # take the clock as an argument, which is the only reason a rule about a window can be asserted
 # in a millisecond instead of waited out.
 class LedgerTest < MinerTest
-  Ledger = AgentsFyiMiner::Ledger
+  Ledger = AgentsMiner::Ledger
 
   def test_a_settled_pair_is_not_mined_again
     # The whole reason the ledger exists: a service restart is not a redo.

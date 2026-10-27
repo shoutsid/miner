@@ -6,10 +6,10 @@ require_relative "test_helper"
 
 # Choosing upgrades from the index's own history.
 class VersionsTest < MinerTest
-  V = AgentsFyiMiner::Versions
+  V = AgentsMiner::Versions
 
   def pair(from, to, package: "pkg")
-    AgentsFyiMiner::Pair.of(package: package, from_version: from, to_version: to)
+    AgentsMiner::Pair.of(package: package, from_version: from, to_version: to)
   end
 
   def test_releases_are_ordered_by_their_numbers_not_as_strings

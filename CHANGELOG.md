@@ -5,6 +5,13 @@ its image and its command line.
 
 ## [Unreleased]
 
+### Changed
+
+- The project is **Agents**. The client is `agents-miner`, the namespace is `AgentsMiner`, the
+  environment variables use the `AGENTS_` prefix, the state directory is
+  `~/.cache/agents-miner`, and the image tags use `agents-miner`. The old names are not read or
+  accepted; this is a breaking rename, so the client is `2.0.0`.
+
 ### Fixed
 
 - `mine` prints a differential without registering an operator or filing a report. It shared

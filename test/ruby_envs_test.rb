@@ -12,7 +12,7 @@ require_relative "test_helper"
 #
 # `with_stub` restores what it replaced, which is what `monkeypatch` did.
 class RubyEnvsTest < MinerTest
-  R = AgentsFyiMiner::RubyEnvs
+  R = AgentsMiner::RubyEnvs
 
   def env(package: "rake", version: "13.1.0", require_path: "rake", root: nil)
     R::Env.of(package: package, version: version, root: root || @home, require_path: require_path)
@@ -26,7 +26,7 @@ class RubyEnvsTest < MinerTest
     # `instance_exec` rather than `define_singleton_method(name, &body)`: a block handed to
     # `define_method` runs with `self` bound to the *receiver*, so a stub that calls `assert` or
     # `result` — both helpers on this test — would be calling them on the module and fail with
-    # `undefined method 'assert' for module AgentsFyiMiner::RubyEnvs`. Running the block against
+    # `undefined method 'assert' for module AgentsMiner::RubyEnvs`. Running the block against
     # the test keeps those helpers reachable while the arguments still arrive as the call's.
     test = self
     mod.define_singleton_method(name) { |*args, **kwargs, &blk| test.instance_exec(*args, **kwargs, &body) }
@@ -219,7 +219,7 @@ class RubyEnvsTest < MinerTest
     }
 
     with_stub(R, :capture, failing) do
-      error = assert_raises(AgentsFyiMiner::Errors::MinerError) do
+      error = assert_raises(AgentsMiner::Errors::MinerError) do
         R.build("bcrypt", "3.1.20", home: @home)
       end
       assert error.permanent?, "a native build this machine cannot do is a fact about the release"
@@ -358,7 +358,7 @@ class RubyEnvsTest < MinerTest
     # not the gem being unbuildable. Settled as permanent it drops every crossing that shares the
     # release until the interpreter moves.
     with_stub(R, :capture, ->(*_args, **_kwargs) { result(status: -9) }) do
-      error = assert_raises(AgentsFyiMiner::Errors::MinerError) do
+      error = assert_raises(AgentsMiner::Errors::MinerError) do
         R.checked(["gem", "install", "rake"], what: "install rake", timeout: 60, env: {},
           release: "rake 13.1.0")
       end
@@ -388,7 +388,7 @@ class RubyEnvsTest < MinerTest
              "Results logged to /tmp/extensions/x86_64-linux/3.3.0/racc-1.8.1/gem_make.out\n"
 
     with_stub(R, :capture, ->(*_args, **_kwargs) { result(status: 1, output: output) }) do
-      error = assert_raises(AgentsFyiMiner::Errors::MinerError) do
+      error = assert_raises(AgentsMiner::Errors::MinerError) do
         R.checked(["gem", "install", "rubyXL"], what: "installing rubyXL 3.3.33", timeout: 60,
           env: {}, release: "rubyXL 3.3.33")
       end

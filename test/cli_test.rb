@@ -13,7 +13,7 @@ require_relative "test_helper"
 # return before any work starts (help, and a usage error), and every other test drives the parser or
 # the default resolution directly.
 class CliTest < MinerTest
-  C = AgentsFyiMiner::Cli
+  C = AgentsMiner::Cli
 
   def parse(argv) = C.build_parser.parse(argv)
 
@@ -53,10 +53,10 @@ class CliTest < MinerTest
     assert_equal C::QUEUE_PAGES, args.queue_pages
     assert_equal 1, args.report_budget
     assert_equal "INFO", args.log_level
-    assert_equal AgentsFyiMiner::Verifying::AS_REPORTED, args.role
-    assert_equal AgentsFyiMiner::Service::DEFAULT_WORKERS, args.workers
-    assert_equal AgentsFyiMiner::Service::WRITES_PER_HOUR, args.writes_per_hour
-    assert_equal AgentsFyiMiner::Service::DOWNLOAD_MBPS, args.download_mbps
+    assert_equal AgentsMiner::Verifying::AS_REPORTED, args.role
+    assert_equal AgentsMiner::Service::DEFAULT_WORKERS, args.workers
+    assert_equal AgentsMiner::Service::WRITES_PER_HOUR, args.writes_per_hour
+    assert_equal AgentsMiner::Service::DOWNLOAD_MBPS, args.download_mbps
     refute args.json
     refute args.dry_run
     refute args.no_sleep
@@ -112,7 +112,7 @@ class CliTest < MinerTest
   # The watchlist depth describes the *deployment*, so it is read from the environment.
   def test_the_top_default_comes_from_miner_top
     ENV.delete("MINER_TOP")
-    assert_equal AgentsFyiMiner::Watchlist::DEFAULT_TOP, C.env_top
+    assert_equal AgentsMiner::Watchlist::DEFAULT_TOP, C.env_top
 
     ENV["MINER_TOP"] = "500"
     assert_equal 500, C.env_top
@@ -124,7 +124,7 @@ class CliTest < MinerTest
     %w[zero 0 -5 3.5].each do |value|
       ENV["MINER_TOP"] = value
 
-      assert_equal AgentsFyiMiner::Watchlist::DEFAULT_TOP, C.env_top, value
+      assert_equal AgentsMiner::Watchlist::DEFAULT_TOP, C.env_top, value
     end
   end
 
@@ -135,7 +135,7 @@ class CliTest < MinerTest
 
     assert_equal C::DEFAULT_HOME, miner.home
     assert_equal C::DEFAULT_VERIFIER_HOME, verifier.home
-    assert_equal AgentsFyiMiner::Planner::DEFAULT_BUDGET, miner.budget
+    assert_equal AgentsMiner::Planner::DEFAULT_BUDGET, miner.budget
     assert_equal C::VERIFY_BUDGET, verifier.budget
     assert_equal C.env_top, miner.top
   end
@@ -152,7 +152,7 @@ class CliTest < MinerTest
     out, = capture_io { status = C.main(["-h"]) }
 
     assert_equal 0, status
-    assert_includes out, "agents-fyi-miner"
+    assert_includes out, "agents-miner"
     assert_includes out, "--package"
   end
 
@@ -161,7 +161,7 @@ class CliTest < MinerTest
     out, err = capture_io { status = C.main(["--version"]) }
 
     assert_equal 0, status
-    assert_equal "#{AgentsFyiMiner::VERSION}\n", out
+    assert_equal "#{AgentsMiner::VERSION}\n", out
     assert_empty err
   end
 
@@ -169,7 +169,7 @@ class CliTest < MinerTest
     args = parse(["mine", "--package", "httpx", "--from", "1.0", "--to", "2.0",
                   "--home", @home.to_s])
     C.resolve_defaults(args)
-    pair = AgentsFyiMiner::Pair.of(package: "httpx", from_version: "1.0", to_version: "2.0")
+    pair = AgentsMiner::Pair.of(package: "httpx", from_version: "1.0", to_version: "2.0")
 
     original_resolve = C.method(:resolve_pairs)
     original_mine = C.method(:mine_pair)
@@ -201,16 +201,16 @@ class CliTest < MinerTest
     # `limit_max` trap in `Watchlist`, one field over.
     args = parse(["serve"])
 
-    assert_equal AgentsFyiMiner::Service::DEFAULT_WORKERS, args.workers
-    assert_equal AgentsFyiMiner::Service::WRITES_PER_HOUR, args.writes_per_hour
-    assert_equal AgentsFyiMiner::Service::DOWNLOAD_MBPS, args.download_mbps
+    assert_equal AgentsMiner::Service::DEFAULT_WORKERS, args.workers
+    assert_equal AgentsMiner::Service::WRITES_PER_HOUR, args.writes_per_hour
+    assert_equal AgentsMiner::Service::DOWNLOAD_MBPS, args.download_mbps
   end
 
   def test_a_verifier_registers_under_the_account_its_role_names
     # The service counts *distinct* operators, so the two methods are two accounts — and the two
     # names are the ones the deployment's own environment expects to see.
-    as_reported = C::VERIFIER_IDENTITIES.fetch(AgentsFyiMiner::Verifying::AS_REPORTED)
-    searched = C::VERIFIER_IDENTITIES.fetch(AgentsFyiMiner::Verifying::SEARCHED)
+    as_reported = C::VERIFIER_IDENTITIES.fetch(AgentsMiner::Verifying::AS_REPORTED)
+    searched = C::VERIFIER_IDENTITIES.fetch(AgentsMiner::Verifying::SEARCHED)
 
     assert_equal "claim-verifier@agents.shoutsid.fyi", as_reported[1]
     assert_equal "surface-verifier@agents.shoutsid.fyi", searched[1]

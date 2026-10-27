@@ -28,50 +28,50 @@ class BandwidthTest < MinerTest
     # Loopback is traffic this container sent itself, which is not the link.
     path = write("dev", PROC)
 
-    assert_equal 5000, AgentsFyiMiner::Bandwidth.received_bytes(path)
+    assert_equal 5000, AgentsMiner::Bandwidth.received_bytes(path)
   end
 
   def test_an_unreadable_counter_is_not_a_reading
     # `nil` rather than `0`: a machine that cannot say is not a machine at zero.
-    assert_nil AgentsFyiMiner::Bandwidth.received_bytes(@home + "absent")
+    assert_nil AgentsMiner::Bandwidth.received_bytes(@home + "absent")
   end
 
   def test_banner_lines_alone_are_not_a_reading
     # The header of `/proc/net/dev` has no interface under it, so there is no number.
     path = write("dev", PROC.lines.first)
 
-    assert_nil AgentsFyiMiner::Bandwidth.received_bytes(path)
+    assert_nil AgentsMiner::Bandwidth.received_bytes(path)
   end
 
   def test_a_rate_is_the_bytes_between_two_readings_over_the_time
-    earlier = AgentsFyiMiner::Bandwidth::Reading.new(bytes: 1_000, at: 10.0)
-    later = AgentsFyiMiner::Bandwidth::Reading.new(bytes: 3_000, at: 12.0)
+    earlier = AgentsMiner::Bandwidth::Reading.new(bytes: 1_000, at: 10.0)
+    later = AgentsMiner::Bandwidth::Reading.new(bytes: 3_000, at: 12.0)
 
-    assert_equal 1_000.0, AgentsFyiMiner::Bandwidth.rate_between(earlier, later)
+    assert_equal 1_000.0, AgentsMiner::Bandwidth.rate_between(earlier, later)
   end
 
   def test_a_counter_that_went_backwards_is_not_a_rate
     # A container restarted under a counter that survives nothing is not a speed.
-    earlier = AgentsFyiMiner::Bandwidth::Reading.new(bytes: 9_000, at: 10.0)
-    later = AgentsFyiMiner::Bandwidth::Reading.new(bytes: 10, at: 20.0)
+    earlier = AgentsMiner::Bandwidth::Reading.new(bytes: 9_000, at: 10.0)
+    later = AgentsMiner::Bandwidth::Reading.new(bytes: 10, at: 20.0)
 
-    assert_nil AgentsFyiMiner::Bandwidth.rate_between(earlier, later)
+    assert_nil AgentsMiner::Bandwidth.rate_between(earlier, later)
   end
 
   def test_two_readings_at_one_moment_are_not_a_rate
     # Dividing by an elapsed time of zero is a crash, and the honest answer is none.
     same = 10.0
 
-    assert_nil AgentsFyiMiner::Bandwidth.rate_between(
-      AgentsFyiMiner::Bandwidth::Reading.new(bytes: 1, at: same),
-      AgentsFyiMiner::Bandwidth::Reading.new(bytes: 9, at: same)
+    assert_nil AgentsMiner::Bandwidth.rate_between(
+      AgentsMiner::Bandwidth::Reading.new(bytes: 1, at: same),
+      AgentsMiner::Bandwidth::Reading.new(bytes: 9, at: same)
     )
   end
 
   def test_an_unreadable_reading_is_not_a_rate
-    assert_nil AgentsFyiMiner::Bandwidth.rate_between(
-      AgentsFyiMiner::Bandwidth::Reading.new(bytes: nil, at: 1.0),
-      AgentsFyiMiner::Bandwidth::Reading.new(bytes: 9, at: 2.0)
+    assert_nil AgentsMiner::Bandwidth.rate_between(
+      AgentsMiner::Bandwidth::Reading.new(bytes: nil, at: 1.0),
+      AgentsMiner::Bandwidth::Reading.new(bytes: 9, at: 2.0)
     )
   end
 
@@ -196,13 +196,13 @@ class BandwidthTest < MinerTest
 
   def test_the_process_ceiling_is_off_until_somebody_sets_it
     # A limit is a choice about somebody's connection, so it is not a default here.
-    before = AgentsFyiMiner::Bandwidth.limit
+    before = AgentsMiner::Bandwidth.limit
 
     assert_equal 0.0, before
-    AgentsFyiMiner::Bandwidth.set_limit(2_000_000.0, streams: 6)
-    assert_equal 2_000_000.0, AgentsFyiMiner::Bandwidth.limit
+    AgentsMiner::Bandwidth.set_limit(2_000_000.0, streams: 6)
+    assert_equal 2_000_000.0, AgentsMiner::Bandwidth.limit
   ensure
-    AgentsFyiMiner::Bandwidth.set_limit(before)
+    AgentsMiner::Bandwidth.set_limit(before)
   end
 
   def test_configuring_the_ceiling_restarts_the_measurement
@@ -229,7 +229,7 @@ class BandwidthTest < MinerTest
   # the throttle. The last value repeats when a list runs out, so a control loop that reads
   # more often than the test listed values is still driveable.
   def driven(readings:, moments:, limit:, streams:)
-    AgentsFyiMiner::Bandwidth::Throttle.new(
+    AgentsMiner::Bandwidth::Throttle.new(
       limit: limit, streams: streams, read: stepper(readings), clock: stepper(moments)
     )
   end
