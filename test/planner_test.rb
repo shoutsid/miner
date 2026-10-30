@@ -108,68 +108,82 @@ class PlannerTest < MinerTest
     assert_equal %w[click], chosen.pairs.map(&:package)
   end
 
-  # The order the three separate scans produced, recomputed from the same pairs.
+  # The score recomputed from the ledger's records rather than called.
   #
-  # Written out rather than called, because the point is to pin what the *old* implementation
-  # answered: a helper that shared the new code would agree with it by construction and catch
-  # nothing.
-  def scan_order(store, demand, watchlist)
-    candidates = (demand + watchlist).uniq
-    demand_set = demand.to_set
-    live = watchlist.reject { |package| demand_set.include?(package) }
+  # Written out rather than shared with the planner: a helper that called the same method would
+  # agree with it by construction and catch nothing. The literal orders beside the comparisons
+  # are the second guard — a bug in both would still have to produce those.
+  def scan_order(store, demand, watchlist, leads: {})
+    candidates = (demand.keys + leads.keys + watchlist).uniq
+    positions = {}
+    watchlist.each_with_index { |package, index| positions[package] ||= index }
 
-    settled = lambda do |package|
+    scored = candidates.map do |package|
       prefix = "#{package} "
-      store.pairs.count { |key, record| key.start_with?(prefix) && L::SETTLED_PAIR.include?(record.outcome) }
-    end
-    yielded = lambda do |package|
-      prefix = "#{package} "
-      store.pairs.sum do |key, record|
-        key.start_with?(prefix) && L::SETTLED_PAIR.include?(record.outcome) ? record.findings : 0
+      owned = store.pairs.select { |key, _record| key.start_with?(prefix) }
+      settled = owned.count { |_key, record| L::SETTLED_PAIR.include?(record.outcome) }
+      yielded = owned.sum do |_key, record|
+        L::SETTLED_PAIR.include?(record.outcome) ? record.findings : 0
       end
-    end
-    last_touched = lambda do |package|
-      prefix = "#{package} "
-      stamps = store.pairs.filter_map { |key, record| record.at if key.start_with?(prefix) && record.at }
-      stamps.max || 0.0
-    end
-    tier = lambda do |package|
-      next 0 if demand_set.include?(package)
-
-      settled.call(package) >= P::BARREN_LIMIT && yielded.call(package).zero? ? 2 : 1
+      last = owned.filter_map { |_key, record| record.at }.max || 0.0
+      weight = 1 + demand.fetch(package, 0) + (leads.key?(package) ? P::LEAD_BONUS : 0)
+      [package, weight * (yielded + 1).fdiv(settled + P::YIELD_PRIOR), last]
     end
 
-    candidates.each_with_index
-              .sort_by do |package, index|
-                [tier.call(package), last_touched.call(package),
-                 live.include?(package) ? live.index(package) : -1, index]
-              end
-              .map(&:first)
+    scored.each_with_index
+          .sort_by do |(package, value, last), index|
+            [-value, last, positions.fetch(package, -1), index]
+          end
+          .map { |(package, _value, _last), _index| package }
   end
 
-  def test_the_order_is_the_one_the_three_scans_produced
-    # The ordering used to be three walks of the ledger per candidate and is now one derived
-    # index. This recomputes the order the walks produced, from the same pairs, and asserts the
-    # two agree — the regression guard for the part of a speed-up that could quietly change what
-    # gets mined.
-    #
-    # The literal order is asserted too, so a bug in both the index and this test's re-derivation
-    # cannot make the test agree with itself.
+  def test_the_order_is_the_one_the_value_of_information_rule_produces
+    # The planner used to sort by three hard tiers; it now scores demand times yield. This
+    # recomputes the score from the same pairs and asserts the two agree, with the literal order
+    # as the guard that a bug in both cannot make the test agree with itself.
     store = L.new
     store.record_pair("httpx", "0.26.0", "0.27.2", outcome: L::DONE, findings: 1, now: 500.0)
     store.record_pair("click", "7.1.2", "8.0.0", outcome: L::EMPTY, now: 100.0)
     store.record_pair("click", "8.0.0", "8.1.0", outcome: L::EMPTY, now: 200.0)
     store.record_pair("click", "8.1.0", "8.1.7", outcome: L::EMPTY, now: 300.0)
     store.record_pair("sqlalchemy", "1.4.54", "2.0.0", outcome: L::DONE, findings: 2, now: 400.0)
-    demand = ["sqlalchemy"]
+    demand = { "sqlalchemy" => 1 }
     watchlist = %w[httpx click sqlalchemy wrapt]
 
-    ordered = P.package_order(demand: demand, watchlist: watchlist, ledger: store,
-      barren_limit: P::BARREN_LIMIT)
+    ordered = P.package_order(demand: demand, watchlist: watchlist, ledger: store)
 
     assert_equal scan_order(store, demand, watchlist), ordered
-    # demand, then the still-producing (never touched first), then the barren one.
-    assert_equal %w[sqlalchemy wrapt httpx click], ordered
+    # Demand puts sqlalchemy (2.0) first; httpx's one finding on one pair (0.67) beats the
+    # unseen wrapt (0.5), which still beats the three-times-empty click (0.2).
+    assert_equal %w[sqlalchemy httpx wrapt click], ordered
+  end
+
+  def test_a_never_examined_package_outranks_one_examined_and_empty
+    # The floor the score exists for: a hard tier ranked both in the same place, so a package
+    # whose three silent releases say nothing could sit ahead of one nobody had ever looked at.
+    store = L.new
+    3.times do |index|
+      store.record_pair("click", "8.#{index}.0", "8.#{index + 1}.0",
+        outcome: L::EMPTY, now: 100.0 + index)
+    end
+
+    ordered = P.package_order(demand: {}, watchlist: %w[click unseen], ledger: store)
+
+    assert_equal %w[unseen click], ordered
+    assert_equal scan_order(store, {}, %w[click unseen]), ordered
+  end
+
+  def test_demand_counts_reports_rather_than_merely_noticing_a_library
+    reports = [report(id: "a", library: "sqlalchemy"), report(id: "b", library: "sqlalchemy"),
+               report(id: "c", library: "httpx")]
+
+    counts = P.demand_counts(reports)
+
+    assert_equal({ "sqlalchemy" => 2, "httpx" => 1 }, counts)
+    assert_equal %w[sqlalchemy httpx], P.ordered_demand(counts)
+    # Both are unseen, so the weight is the whole of the difference.
+    assert_equal %w[sqlalchemy httpx],
+      P.package_order(demand: counts, watchlist: %w[httpx sqlalchemy], ledger: L.new)
   end
 
   def test_the_package_touched_longest_ago_goes_first

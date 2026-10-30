@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "set"
-
 require_relative "errors"
 require_relative "log"
 require_relative "pair"
@@ -18,31 +16,41 @@ module AgentsMiner
   # them has dozens of releases — so the whole job is choosing, and a miner whose choice is
   # arbitrary is one that spends its life re-installing `requests` patch by patch.
   #
-  # Three signals decide the order, and each exists because its absence produces a specific
-  # kind of waste.
+  # One score decides the order: what the corpus is asking for, times how often the package has
+  # paid when examined, with a prior so a package nobody has looked at yet is neither starved nor
+  # promoted above one that is paying. Cost — the design's third factor — is one install and two
+  # process starts for every pair, the same divisor for every candidate; it is named in
+  # `package_order` rather than approximated, because a measured per-pair cost needs durations
+  # the ledger does not record.
   #
-  # *Demand comes before breadth.* The corpus knows what agents are actually hitting: a report
-  # sitting `open` is somebody's unanswered question, and the library it names is a library
-  # worth the next hour. That is also the only signal in the system that comes from outside the
-  # miner, which makes it the only one that can tell the miner it is wrong about what matters.
+  # *Demand is the only signal from outside the miner.* A report sitting `open` is somebody's
+  # unanswered question, and the library it names is a library worth the next hour. Counting the
+  # reports rather than merely noticing that there are some is what lets two questions outrank
+  # one, which the old three-tier order could not express.
   #
-  # *Productive packages come before barren ones.* A package that has produced nothing across
-  # three examined releases has either changed less than the index suggests or broken its
-  # callers in a way this differential cannot see. It is not abandoned — it is deferred behind
-  # everything that is still paying.
+  # *Yield is the miner's own record.* A package that has produced nothing across three examined
+  # releases has either changed less than the index suggests or broken its callers in a way this
+  # differential cannot see. Its rate falls; it is not abandoned.
   #
-  # *Least recently touched comes first within a tier.* Without it, a tier's head would be
-  # worked forever while the tail waited, because the head's next pair is always available. The
-  # ledger records when each pair was examined, so this is a read rather than a counter.
+  # *Recency breaks ties.* Without it, the head of an equal score would be worked forever while
+  # the tail waited, because the head's next pair is always available. The ledger records when
+  # each pair was examined, so this is a read rather than a counter.
   #
   # Nothing here touches the network or the corpus: the caller supplies the reports and a
   # function that returns a package's release history, so the schedule can be tested by
   # asserting which work came back.
   module Planner
-    # How many examined releases with nothing found moves a package behind the ones that are
-    # still producing. Three rather than one: a single silent pair is a package whose last
-    # release happened to change nothing, which is normal.
-    BARREN_LIMIT = 3
+    # The prior a package's yield starts from, in examined pairs: two imagined pairs of which
+    # one produced a finding, so a package nothing is known about sits at 0.5. That is the floor
+    # the design asks for — above a package examined repeatedly with nothing to show, below one
+    # that is paying — and it replaces the hard tier that put a never-examined package beside one
+    # that had failed three times.
+    YIELD_PRIOR = 2
+
+    # What a reviewed advisory is worth in the demand term: a lead is a signal from outside the
+    # corpus but a weaker one than a report somebody filed, so it sits between no demand (1.0)
+    # and one report (2.0).
+    LEAD_BONUS = 0.5
 
     # How far back through a package's history the miner will go.
     #
@@ -171,14 +179,14 @@ module AgentsMiner
       # RubyGems' by `Gem::Version`, and the pair each produces has to carry the index it came
       # from. Omitted, this is the PyPI ladder, which is what every caller before Ruby was.
       def plan(reports:, watchlist:, ledger:, history_for:, now:, budget: DEFAULT_BUDGET,
-               report_budget: 1, per_package: 1, barren_limit: BARREN_LIMIT,
+               report_budget: 1, per_package: 1,
                max_fetches: DEFAULT_FETCHES, max_crossings: MAX_CROSSINGS,
                cache_has: NEVER_CACHED, crossings_of: nil, leads: {}, advisory_of: nil)
         ladder = crossings_of || Versions.method(:crossings)
-        demand = demanded(reports)
+        counts = demand_counts(reports)
+        demand = ordered_demand(counts)
         chosen_reports = reports_to_answer(reports, ledger, now: now, budget: report_budget)
-        order = package_order(demand: demand, watchlist: watchlist, ledger: ledger,
-          barren_limit: barren_limit, leads: leads)
+        order = package_order(demand: counts, watchlist: watchlist, ledger: ledger, leads: leads)
 
         due = {}
         withheld = {}
@@ -325,13 +333,24 @@ module AgentsMiner
       # Only reports the solver could actually answer, because a demand signal it cannot act on
       # is noise in the ordering: a report about a platform outage names a library the
       # differential will never have a release of.
-      def demanded(reports)
+      def demanded(reports) = ordered_demand(demand_counts(reports))
+
+      # How many answerable reports name each library — the demand *weight*, not only the order.
+      #
+      # Two reports about one library outranking one about another is the ranking the three tiers
+      # could only state as a tie: presence was all a tier could hold.
+      def demand_counts(reports)
         counts = Hash.new(0)
         reports.each do |report|
           next unless Solving.answerable?(report)
 
           counts[report["library"]] += 1
         end
+        counts
+      end
+
+      # Most asked-for first, alphabetically among equals.
+      def ordered_demand(counts)
         counts.sort_by { |library, count| [-count, library] }.map(&:first)
       end
 
@@ -346,58 +365,48 @@ module AgentsMiner
 
       # The packages to consider, in the order to consider them.
       #
-      # Three keys, in order: demand first, then packages that are still producing, then packages
-      # that have gone quiet, and within each the least recently touched. A package never touched
-      # sorts first inside its tier, which is what makes a fresh install of the service walk the
-      # whole watchlist before revisiting one.
+      # `demand` is a hash of library to the number of answerable reports naming it, because the
+      # weight matters as much as the ordering: two questions about one library are a stronger
+      # signal than one, and a tier could only say "present".
+      #
+      # The score is `demand × yield`, and cost is deliberately absent rather than invented: one
+      # install and two process starts is the same for every pair, so it is a constant divisor and
+      # cannot change the order. A measured per-pair cost needs durations the ledger does not
+      # record yet; when it does, the divisor belongs here beside the other two factors.
       #
       # The whole ranking comes back rather than a leading slice of it. Truncating here is how
       # the service came to do nothing at all: the slice is chosen by "never touched", so the
       # packages that can never be touched — the ones with no crossing to examine — take it and
       # hold it. How far into this list a cycle walks is `plan`'s decision, because only `plan`
       # knows what a package cost to look at and whether it found anything.
-      #
-      def package_order(demand:, watchlist:, ledger:, barren_limit:, leads: {})
+      def package_order(demand:, watchlist:, ledger:, leads: {})
         # A reviewed advisory adds its package to the candidates, which is the point of a lead: a gem
         # the service's queue has not ranked yet — because no report names it and the breadth seed
         # never reached it — is still worth examining when GitHub reviewed a vulnerability in it.
-        candidates = (demand + leads.keys + watchlist).uniq
-        demand_set = demand.to_set
-        # The leads are a tier of their own: above the breadth order, below demand. A package can be
-        # both — a report about it and an advisory naming it — and the stronger signal takes the
-        # place, because the two are statements about different things.
-        lead_set = leads.keys.to_set
-        live = watchlist.reject { |package| demand_set.include?(package) }
+        candidates = (demand.keys + leads.keys + watchlist).uniq
         # The position of each package in the breadth order, built once. `live.index` was the
         # same answer at the cost of a scan per candidate, and a duplicate keeps its FIRST
         # position here, which is what `index` returned.
         positions = {}
-        live.each_with_index { |package, index| positions[package] ||= index }
+        watchlist.each_with_index { |package, index| positions[package] ||= index }
 
-        tier = lambda do |package|
-          next 0 if demand_set.include?(package)
-          next 1 if lead_set.include?(package)
-
+        scored = candidates.map do |package|
           totals = ledger.package_totals(package)
-          totals.settled >= barren_limit && totals.yielded.zero? ? 3 : 2
+          weight = 1 + demand.fetch(package, 0) + (leads.key?(package) ? LEAD_BONUS : 0)
+          rate = (totals.yielded + 1).fdiv(totals.settled + YIELD_PRIOR)
+          [package, weight * rate, totals.last]
         end
 
-        # The index is part of the key and not decoration: Python's `sorted` is stable and
-        # Ruby's `sort_by` is not, so two candidates that tie on all three keys would come back
-        # in an order this process chose — and the order decides what gets mined.
-        candidates.each_with_index
-                  .sort_by { |package, index|
-          [tier.call(package), last_touched(ledger, package),
-                                               positions.fetch(package, -1), index] }
-                  .map(&:first)
+        # Highest value first; then least recently touched; then breadth order (a package the
+        # watchlist did not name sorts after one it did); then the input index, because Ruby's
+        # `sort_by` is not stable and two candidates that tie on every key would otherwise come
+        # back in an order this process chose — and the order decides what gets mined.
+        scored.each_with_index
+              .sort_by do |(package, value, last), index|
+                [-value, last, positions.fetch(package, -1), index]
+              end
+              .map { |(package, _value, _last), _index| package }
       end
-
-      # When this package was last worked on, or 0 for never.
-      #
-      # Read from the ledger's derived index rather than by walking the pairs: this is one of the
-      # three questions the ordering asks about every candidate, and the three of them together
-      # used to be three full scans of the ledger per cycle.
-      def last_touched(ledger, package) = ledger.package_totals(package).last
 
       private
 

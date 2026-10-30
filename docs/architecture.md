@@ -86,9 +86,12 @@ returning the ranking *instead of* the queue made the operator's depth meaningle
 returning the queue *instead of* the ranking ran out of work with thousands of packages on
 disk.
 
-The planner orders work by demand first, then by yield, then least-recently touched, taking
-one pair per package before a second pair of any. A package that has produced nothing across
-three examined releases is deferred behind packages that are still paying.
+The planner scores work by demand — how many answerable reports name the library — times the
+package's measured yield, with a prior that puts a never-examined package above one examined
+three times with nothing to show. Recency breaks ties, and it takes one pair per package before
+a second pair of any. Cost is the same one install and two starts for every pair, so it is a
+constant divisor rather than an invented factor; a measured per-pair cost needs durations the
+ledger does not record yet.
 
 ## Concurrency
 
