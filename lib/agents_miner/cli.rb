@@ -512,9 +512,15 @@ module AgentsMiner
     # "could not do this for this package", and anything else is a bug in the miner that should be
     # seen rather than swallowed fifteen times.
     def self.mine_pair(pair, args)
+      # The same cold-path measurement the service records: both installs and the differential.
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       before = Envs.build(pair.package, pair.from_version, home: args.home + "envs")
       after = Envs.build(pair.package, pair.to_version, home: args.home + "envs")
-      Mine.findings_between(pair.package, pair.from_version, pair.to_version, before, after)
+      findings = Mine.findings_between(pair.package, pair.from_version, pair.to_version, before,
+        after)
+      elapsed = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
+      findings.each { |finding| finding.duration_ms = elapsed }
+      findings
     rescue Errors::MinerError => e
       $stderr.puts("[skip] #{pair}: #{e.message}")
       []

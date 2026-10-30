@@ -131,13 +131,14 @@ module AgentsMiner
     attr_accessor :library, :module_name, :version, :mechanism, :title, :problem, :resolution,
       :ecosystem, :runtime, :parameter, :symbol, :replacement,
       :refused_candidate, :moved, :signatures, :call_sites,
-      :repaired_call_sites, :trace, :notes
+      :repaired_call_sites, :trace, :notes, :exception, :accepted_output, :callable, :duration_ms
 
     def initialize(library: nil, module_name: "", version: nil, mechanism: nil, title: nil,
                    problem: nil, resolution: nil, ecosystem: "python", runtime: "", parameter: "",
                    symbol: "", replacement: nil, refused_candidate: nil, moved: nil,
                    signatures: [], call_sites: 1, repaired_call_sites: 0, trace: "",
-                   notes: [])
+                   notes: [], exception: "", accepted_output: "", callable: "",
+                   duration_ms: 0)
       # What pydantic did with a missing field, kept as a refusal rather than a nil: a finding
       # without a title is a request the corpus would answer 422 to, and the miner would learn that
       # after the work of deriving it.
@@ -194,6 +195,15 @@ module AgentsMiner
       @repaired_call_sites = repaired_call_sites
       @trace = trace
       @notes = notes
+      # **What the claim needs to become executable, and what it cost to establish.** The
+      # exception is the observation the probe will assert, the callable is what a scenario calls
+      # on the accepted side, and `duration_ms` is the cold path — both installs plus the
+      # differential — measured by the caller that built them. None of it changes the report; all
+      # of it is what lets a third party re-run the comparison and lets Gate B read a cost.
+      @exception = exception
+      @accepted_output = accepted_output
+      @callable = callable
+      @duration_ms = duration_ms
     end
 
     # What this release took away, whichever pass established it.
@@ -215,7 +225,9 @@ module AgentsMiner
         "symbol" => symbol, "replacement" => replacement,
         "refused_candidate" => refused_candidate, "moved" => moved,
         "signatures" => signatures, "call_sites" => call_sites,
-        "repaired_call_sites" => repaired_call_sites, "trace" => trace, "notes" => notes
+        "repaired_call_sites" => repaired_call_sites, "trace" => trace, "notes" => notes,
+        "exception" => exception, "accepted_output" => accepted_output,
+        "callable" => callable, "duration_ms" => duration_ms
       }
     end
   end
@@ -372,6 +384,11 @@ module AgentsMiner
       # evidence.
       repaired_call_sites: repaired.size,
       notes: [note_for(group.size, repaired.size)],
+      # The three facts a scenario proposal and its run are built from. `callable` is the function
+      # a call finding was made against; a symbol finding's name is already `symbol`.
+      exception: observed.exception.to_s,
+      accepted_output: observed.accepted_output.to_s,
+      callable: Mechanism.symbol?(mechanism) ? "" : observed.symbol.to_s,
       trace: observed.traceback.to_s.strip
     )
   end

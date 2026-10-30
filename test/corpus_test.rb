@@ -74,6 +74,59 @@ class CorpusTest < MinerTest
       JSON.parse(call[:body]))
   end
 
+  # **The order is the contract.** A report can only cite a scenario that exists, so the proposal
+  # comes before the submission; the run comes after it, because a run of a scenario no report
+  # cites would be inert. The duration is the cold path the examination measured.
+  def test_filing_proposes_cites_and_records_the_run
+    http = FakeHttp.new do |method:, url:, body:|
+      case url
+      when %r{/api/reports/precheck} then response(body: JSON.generate("verdict" => "new"))
+      when %r{/api/scenarios\z} then response(body: JSON.generate("id" => "s1"))
+      when %r{/api/scenarios/s1/runs} then response(body: JSON.generate("scenario_id" => "s1"))
+      else response(body: JSON.generate("id" => "r1"))
+      end
+    end
+    finding = AgentsMiner::Finding.new(
+      library: "httpx", version: "0.28.1", mechanism: AgentsMiner::Mechanism::PARAMETER_RENAMED,
+      title: "httpx renamed proxies=", problem: "the argument moved", ecosystem: "python",
+      parameter: "proxies", callable: "Client", exception: "TypeError: refused proxies",
+      accepted_output: "Client()", duration_ms: 4_321
+    )
+
+    assert_equal "filed", client(http).submit_mined(finding, from_version: "0.27.2")
+
+    urls = http.calls.map { |call| call[:url] }
+    assert_equal ["http://x/api/reports/precheck", "http://x/api/scenarios",
+                  "http://x/api/reports", "http://x/api/scenarios/s1/runs"], urls
+    submitted = JSON.parse(http.calls[2][:body])
+    assert_equal "s1", submitted["scenario_id"], "the report cites the claim it was filed with"
+    run = JSON.parse(http.calls[3][:body])
+    assert_equal 4_321, run["duration_ms"]
+    assert_equal({ "raised" => "TypeError" }, run["to_output"])
+  end
+
+  def test_a_scenario_refusal_still_files_the_report
+    # The report is the evidence. A service that would not store the executable claim costs Gate B
+    # one sample, not the finding; the submission must still carry no citation it does not own.
+    http = FakeHttp.new do |method:, url:, body:|
+      case url
+      when %r{/api/reports/precheck} then response(body: JSON.generate("verdict" => "new"))
+      when %r{/api/scenarios\z} then response(status: 422, body: "not now")
+      else response(body: JSON.generate("id" => "r1"))
+      end
+    end
+    finding = AgentsMiner::Finding.new(
+      library: "httpx", version: "0.28.1", mechanism: AgentsMiner::Mechanism::PARAMETER_RENAMED,
+      title: "httpx renamed proxies=", problem: "the argument moved", ecosystem: "python",
+      parameter: "proxies", callable: "Client", exception: "TypeError: refused proxies"
+    )
+
+    assert_equal "filed", client(http).submit_mined(finding, from_version: "0.27.2")
+
+    submitted = JSON.parse(http.calls.find { |call| call[:url].end_with?("/api/reports") }[:body])
+    refute submitted.key?("scenario_id")
+  end
+
   def test_a_429_with_no_wait_is_still_waited_for
     http = answer(status: 429, body: "")
 

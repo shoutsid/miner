@@ -68,6 +68,33 @@ class ReportingTest < MinerTest
     assert_equal "sentence_transformers", payload_for(finding, "2.0.0")["module_name"]
   end
 
+  def test_the_executed_claim_becomes_a_scenario_a_third_party_can_re_run
+    finding = a_finding
+    finding.duration_ms = 4_321
+    proposal = REPORTING.scenario_proposal_for(finding, from_version: "0.27.2")
+
+    assert_equal "httpx", proposal["library"]
+    assert_equal "0.27.2", proposal["from_version"]
+    assert_equal "0.28.1", proposal["to_version"]
+    assert_equal "raises_class", proposal["probe"]["relation"]
+    assert_equal "TypeError", proposal["probe"]["expected"]
+    assert_equal "call", proposal["call"]["kind"]
+    assert_equal "Client", proposal["call"]["callable"]
+    assert_equal "proxies", proposal["call"]["argument"]
+
+    run = REPORTING.scenario_run_for(finding)
+    assert_equal "reached", run["result"]
+    assert_equal "TypeError", run["to_output"]["raised"]
+    assert_equal 4_321, run["duration_ms"]
+  end
+
+  def test_an_observation_with_no_exception_class_proposes_no_scenario
+    # A claim nobody can assert is not a claim. The report is still filed; only the executable
+    # half is absent.
+    assert_nil REPORTING.scenario_proposal_for(a_finding(exception: ""),
+      from_version: "0.27.2")
+  end
+
   def test_a_finding_with_no_observed_import_name_sends_no_field
     refute payload_for(a_finding, "0.27.2").key?("module_name")
   end

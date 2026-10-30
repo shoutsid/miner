@@ -323,9 +323,46 @@ module AgentsMiner
       outcome = verdict["verdict"] || "unknown"
       return outcome if !Errors.filable?(outcome) || dry_run
 
+      # **The claim is proposed before the report cites it, and the run is recorded after it.**
+      # The order is the citation's: a report may only cite a scenario that exists, and a run of a
+      # scenario nobody cites is inert. Both writes are additive — a service that will not take
+      # them must not cost the finding, which is the evidence — so a failure here is swallowed
+      # with its reason rather than raised after the report was written.
       sleep(pace) if pace.to_f.positive?
+      scenario = propose_scenario_for(finding, from_version: from_version)
+      payload = payload.merge("scenario_id" => scenario.fetch("id")) if scenario
       submit(payload)
+      record_run_for(scenario, finding) if scenario
       "filed"
+    end
+
+    # Propose the executable claim behind one finding.
+    def create_scenario(payload) = request("POST", "/api/scenarios", body: payload)
+
+    # Record a reached run of one scenario, with the cost the examination measured.
+    def post_scenario_run(scenario_id, payload)
+      request("POST", "/api/scenarios/#{scenario_id}/runs", body: payload)
+    end
+
+    def propose_scenario_for(finding, from_version:)
+      proposal = Reporting.scenario_proposal_for(finding, from_version: from_version)
+      return nil if proposal.nil?
+
+      created = create_scenario(proposal)
+      id = created["id"]
+      id.nil? ? nil : { "id" => id }
+    rescue Errors::CorpusError
+      # The report is the evidence; the scenario is what makes it re-runnable. Losing the claim
+      # costs Gate B one sample; raising here would cost the corpus the finding.
+      nil
+    end
+
+    def record_run_for(scenario, finding)
+      post_scenario_run(scenario.fetch("id"), Reporting.scenario_run_for(finding))
+    rescue Errors::CorpusError
+      # The report is already filed. A run that could not be stored is a missing cost sample,
+      # not a reason to make the caller believe the filing failed and derive it again.
+      nil
     end
 
     # The one place a request is issued, and the one place a status code becomes an error.

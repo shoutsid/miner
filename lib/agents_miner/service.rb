@@ -982,6 +982,11 @@ module AgentsMiner
     # permanent, and it is one fact about every pair that runs through it rather than one per pair.
     def examine(pair)
       one = index(pair.ecosystem)
+      # **The cold path is the measurement.** Gate B asks what a verification costs, and a
+      # verification that reuses somebody's warm environment is not the price a third party pays:
+      # these two builds are the installs, and the differential is the probe. The clock runs around
+      # all three so the number sent with a run includes what the finding cost to establish.
+      started = monotonic
       begin
         before = build(pair, pair.from_version)
         after = build(pair, pair.to_version)
@@ -990,6 +995,8 @@ module AgentsMiner
       rescue Errors::MinerError => e
         return [[], e]
       end
+      elapsed = ((monotonic - started) * 1000).round
+      findings.each { |finding| finding.duration_ms = elapsed }
       [findings, nil]
     end
 

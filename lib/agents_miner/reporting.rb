@@ -118,6 +118,73 @@ module AgentsMiner
       body
     end
 
+    # **The claim this finding already executed, as a scenario a third party can re-run.**
+    #
+    # Nil when the observation names no exception class: a probe has nothing to assert then, and a
+    # scenario whose expected value is blank would be a claim nobody could confirm or refute. The
+    # proposal is deliberately the same comparison the differential made — install both releases,
+    # call the callable, read what the newer one raises — so the run the miner records next is
+    # evidence about the report's own claim rather than a second, easier question.
+    def self.scenario_proposal_for(finding, from_version:)
+      expected = exception_class(finding)
+      return nil if expected.empty? || from_version.to_s.empty? || finding.version.to_s.empty?
+
+      {
+        "ecosystem" => finding.ecosystem,
+        "library" => finding.library,
+        "from_version" => from_version.to_s,
+        "to_version" => finding.version.to_s,
+        "subject_kind" => "package",
+        "target" => {
+          "module" => finding.module_name.to_s.empty? ? finding.library : finding.module_name,
+          "callable" => Mechanism.symbol?(finding.mechanism) ? finding.symbol : finding.callable,
+          "kind" => finding.mechanism
+        },
+        "setup" => [
+          { "step" => "install", "release" => "#{finding.library} #{from_version}" },
+          { "step" => "install", "release" => "#{finding.library} #{finding.version}" }
+        ],
+        "call" => call_for(finding),
+        "probe" => { "relation" => "raises_class", "expected" => expected },
+        "environment" => runtime_of(finding)
+      }
+    end
+
+    # What the run saw on each side, in `Scenario::Probe`'s observation shape.
+    #
+    # The accepted side returns the value the older release answered with; the refusing side raises
+    # the class the differential observed. A run that says this is `changed` under `raises_class`,
+    # which is the report's claim — and because the miner is the report's author, the service stores
+    # the run and does not count it as an independent confirmation.
+    def self.scenario_run_for(finding)
+      body = {
+        "result" => "reached",
+        "from_output" => { "returned" => finding.accepted_output.to_s },
+        "to_output" => { "raised" => exception_class(finding) },
+        "detail" => "The miner executed the comparison while filing this report.",
+        "environment" => runtime_of(finding)
+      }
+      duration = finding.duration_ms.to_i
+      body["duration_ms"] = duration if duration.positive?
+      body
+    end
+
+    # The exception's class, which is what `raises_class` asserts. The observation carries the
+    # interpreter's whole line (`TypeError: ...`), and the class is the part before the first colon.
+    def self.exception_class(finding)
+      finding.exception.to_s.split(":", 2).first.to_s.strip
+    end
+
+    # The call a scenario makes, in the two shapes the differential establishes.
+    def self.call_for(finding)
+      if Mechanism.symbol?(finding.mechanism)
+        { "kind" => "reference", "name" => finding.symbol.to_s }
+      else
+        { "kind" => "call", "callable" => finding.callable.to_s,
+          "argument" => finding.parameter.to_s, "argument_removed" => true }
+      end
+    end
+
     # What was run against both releases, in the words of what was run.
     #
     # A symbol finding's evidence is that a reference *resolved* on the old release and raised on
