@@ -128,13 +128,13 @@ module AgentsMiner
   class Finding
     REQUIRED = %i[library version mechanism title problem].freeze
 
-    attr_accessor :library, :version, :mechanism, :title, :problem, :resolution,
+    attr_accessor :library, :module_name, :version, :mechanism, :title, :problem, :resolution,
       :ecosystem, :runtime, :parameter, :symbol, :replacement,
       :refused_candidate, :moved, :signatures, :call_sites,
       :repaired_call_sites, :trace, :notes
 
-    def initialize(library: nil, version: nil, mechanism: nil, title: nil, problem: nil,
-                   resolution: nil, ecosystem: "python", runtime: "", parameter: "",
+    def initialize(library: nil, module_name: "", version: nil, mechanism: nil, title: nil,
+                   problem: nil, resolution: nil, ecosystem: "python", runtime: "", parameter: "",
                    symbol: "", replacement: nil, refused_candidate: nil, moved: nil,
                    signatures: [], call_sites: 1, repaired_call_sites: 0, trace: "",
                    notes: [])
@@ -150,6 +150,10 @@ module AgentsMiner
       end
 
       @library = library
+      # The import name the inventory observed, which is not the distribution name for a large
+      # part of PyPI. Empty when this finding's ecosystem has no such observation (a gem's require
+      # path is not read here), and the report sends no field in that case.
+      @module_name = module_name
       @version = version
       @mechanism = mechanism
       @title = title
@@ -204,7 +208,8 @@ module AgentsMiner
     # test compares two findings with.
     def to_h
       {
-        "library" => library, "version" => version, "mechanism" => mechanism,
+        "library" => library, "module_name" => module_name,
+        "version" => version, "mechanism" => mechanism,
         "title" => title, "problem" => problem, "resolution" => resolution,
         "ecosystem" => ecosystem, "runtime" => runtime, "parameter" => parameter,
         "symbol" => symbol, "replacement" => replacement,
@@ -270,7 +275,8 @@ module AgentsMiner
   # (`Colorize::ClassMethods`, `String#magenta`) rather than a bare member name. One template
   # with those words chosen, rather than a second summariser, so the two cannot drift into
   # describing one mechanism two ways.
-  def self.summarise(library, version, from_version, group, ecosystem: "python")
+  def self.summarise(library, version, from_version, group, ecosystem: "python",
+                     module_name: "")
     ruby = ecosystem == "ruby"
     mechanism = mechanism_of(group[0])
     subject = group[0].parameter.to_s.empty? ? group[0].symbol : group[0].parameter
@@ -346,6 +352,7 @@ module AgentsMiner
       ecosystem: ecosystem)
     Finding.new(
       library: library,
+      module_name: module_name,
       version: version,
       mechanism: mechanism,
       ecosystem: ecosystem,

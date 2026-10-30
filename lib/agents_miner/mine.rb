@@ -135,8 +135,10 @@ module AgentsMiner
     # `suffix` is this examination's identity, passed to every probe so its scratch script cannot
     # be overwritten by another worker inspecting the same release — see `envs.probe`, where the
     # reason is written out at length.
-    def self.observations_between(before, after, limit: 200, suffix: "")
-      old_inventory = inventory_for(before, suffix: suffix)
+    def self.observations_between(before, after, limit: 200, suffix: "", old_inventory: nil)
+      # The findings path already built this inventory because it needs the module name; taking it
+      # as a parameter is the difference between one import and two on the miner's hottest step.
+      old_inventory ||= inventory_for(before, suffix: suffix)
       new_inventory = inventory_for(after, suffix: suffix)
       older = index_by_name(old_inventory.entries)
       newer = index_by_name(new_inventory.entries)
@@ -485,9 +487,16 @@ module AgentsMiner
     # the method on `Mine`, which is the receiver — the lexical scope `AgentsMiner` that holds
     # them is where the *constants* come from and not where a method call goes.
     def self.findings_between(library, from_version, to_version, before, after, suffix: "")
-      observations = observations_between(before, after, suffix: suffix)
-      AgentsMiner.cluster(observations)
-                     .map { |group| AgentsMiner.summarise(library, to_version, from_version, group) }
+      old_inventory = inventory_for(before, suffix: suffix)
+      observations = observations_between(before, after, suffix: suffix,
+        old_inventory: old_inventory)
+      # The import name is a fact only the inventory holds — the distribution is `library`, the
+      # module is what every probe wrote in its `import` — so it travels to the report with the
+      # finding rather than being guessed from the distribution.
+      module_name = old_inventory.module
+      AgentsMiner.cluster(observations).map do |group|
+        AgentsMiner.summarise(library, to_version, from_version, group, module_name: module_name)
+      end
     end
 
     # The inventory's entries by name, for the two lookups the passes do.

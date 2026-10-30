@@ -55,6 +55,23 @@ class ReportingTest < MinerTest
     assert_equal "package", payload_for(a_finding, "0.27.2")["subject_kind"]
   end
 
+  def test_the_import_name_the_inventory_observed_reaches_the_body
+    # The distribution is `sentence-transformers` and the module is `sentence_transformers`: the
+    # corpus files reports under the first and a caller imports the second, so the pair is the one
+    # fact only the miner holds.
+    finding = summarise("sentence-transformers", "3.0.0", "2.0.0",
+      [AgentsMiner::Observation.new(symbol: "encode", parameter: "normalize",
+        exception: "TypeError", accepted_before: true, accepted_after: false,
+        traceback: "Traceback")],
+      module_name: "sentence_transformers")
+
+    assert_equal "sentence_transformers", payload_for(finding, "2.0.0")["module_name"]
+  end
+
+  def test_a_finding_with_no_observed_import_name_sends_no_field
+    refute payload_for(a_finding, "0.27.2").key?("module_name")
+  end
+
   def test_the_library_and_the_trace_reach_the_corpus
     payload = payload_for(a_finding, "0.27.2")
 
@@ -169,7 +186,7 @@ class ReportingTest < MinerTest
 
   private
 
-  def summarise(library, version, from_version, group)
-    AgentsMiner.summarise(library, version, from_version, group)
+  def summarise(library, version, from_version, group, **options)
+    AgentsMiner.summarise(library, version, from_version, group, **options)
   end
 end

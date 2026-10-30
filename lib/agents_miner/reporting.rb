@@ -77,7 +77,7 @@ module AgentsMiner
     # it could not, so it is sent when known and left out rather than guessed when it is not. The
     # key is always present — `nil` is a statement, and the corpus stores it as sent.
     def self.payload_for(finding, from_version:, published_at: nil)
-      {
+      body = {
         "title" => finding.title,
         "library" => finding.library,
         "version" => finding.version,
@@ -111,6 +111,11 @@ module AgentsMiner
         "resolution" => finding.resolution || "",
         "trace" => finding.trace || ""
       }
+      # An import name only when the inventory observed one. An empty string is not a name, and
+      # the corpus's field has a floor of one character, so absence is the statement a finding with
+      # no such observation makes.
+      body["module_name"] = finding.module_name unless finding.module_name.to_s.empty?
+      body
     end
 
     # What was run against both releases, in the words of what was run.
