@@ -79,6 +79,24 @@ class VerifierTest < MinerTest
     "updated_at" => "2026-01-01T00:00:00Z"
   }.freeze
 
+  # A proposal as the scenario queue serves it: the whole body, because the caller that executes it
+  # needs the steps and a second read would be one more request per claim.
+  SCENARIO = {
+    "id" => "00000000-0000-0000-0000-00000000c001",
+    "ecosystem" => "python",
+    "library" => "litellm",
+    "from_version" => "1.101.2",
+    "to_version" => "1.102.1",
+    "subject_kind" => "package",
+    "target" => { "constant" => "litellm.completion", "callable" => "completion" },
+    "setup" => [{ "kind" => "import", "value" => "litellm" }],
+    "call" => { "arguments" => [{ "kind" => "string", "value" => "hi" }], "constructor" => [] },
+    "probe" => { "relation" => "raises_class", "expected" => "TypeError" },
+    "environment_digest" => "a1b2c3",
+    "created_by" => "an-agent",
+    "runs" => []
+  }.freeze
+
   # The feed, as the route answers it: one page, with the service's own position of the last row
   # it sent. Rows are ordered and paged by `(updated_at, id)`, which is the cursor the ledger
   # remembers.
@@ -102,7 +120,7 @@ class VerifierTest < MinerTest
 
   # The corpus, with the feed, the bodies and the writes recorded.
   class FakeSession
-    attr_accessor :rows, :bodies, :transient, :after_submit, :paused
+    attr_accessor :rows, :bodies, :transient, :after_submit, :paused, :scenario_pages
     attr_reader :calls, :submit_error
 
     def initialize(rows = [], submit_error: nil, transient: false)
@@ -113,6 +131,18 @@ class VerifierTest < MinerTest
       @transient = transient
       @after_submit = nil
       @paused = {}
+      # One page of proposals per index, keyed by the ecosystem the queue was asked about.
+      @scenario_pages = {}
+    end
+
+    def scenario_queue(ecosystem:, limit: 3)
+      @calls << [:scenario_queue, ecosystem, limit]
+      { "items" => Array(@scenario_pages[ecosystem.to_s]), "count" => 0, "state" => "unrun" }
+    end
+
+    def post_scenario_run(scenario_id, payload)
+      @calls << [:scenario_run, scenario_id, payload]
+      { "scenario_id" => scenario_id }
     end
 
     def me
@@ -832,5 +862,76 @@ class VerifierTest < MinerTest
     # one is a test that can never pass, which is how this read for two runs.
     checked = @check_calls.map { |_subject, _role, suffix| suffix.split("-")[-1][-2..] }
     assert_equal %w[e1 f9 e2 e5 e3 e4].sort, checked.sort
+  end
+
+  # --- the claims somebody proposed ---------------------------------------
+
+  # A scenario is the corpus's answer to a break nobody could explain, and until this loop ran one it
+  # was a proposal for ever. Here the claim is executed and the *run* is the write: the service turns
+  # a reached run whose probe changed into the verification, so the loop must not vote as well.
+  def test_a_proposal_nobody_has_run_is_executed_and_recorded
+    session = fake_session([REPORTED])
+    session.scenario_pages["python"] = [SCENARIO]
+    executed = []
+    stub(AgentsMiner::ScenarioRun, :execute, lambda { |scenario, build:, build_gem: nil|
+      executed << [scenario["id"], build.nil?, build_gem.nil?]
+      { "result" => "reached", "from_output" => { "returned" => "ok" },
+        "to_output" => { "raised" => "TypeError" }, "detail" => "ran both releases" }
+    })
+
+    stats = verifier_for(session).one_cycle
+
+    assert_equal [[SCENARIO["id"], false, false]], executed
+    run = session.calls.find { |call| call[0] == :scenario_run }
+    refute_nil run, "the run was never recorded"
+    assert_equal "reached", run[2]["result"]
+    assert_equal 1, stats.scenarios
+    # One run, not a run and a vote: the service derives the verification from the run, so a second
+    # write from this loop would be the same opinion counted twice.
+    assert_equal 1, session.calls.count { |call| call[0] == :scenario_run }
+  end
+
+  # **A claim this client cannot read is answered rather than skipped.** The service stores the
+  # `unreached` run and counts it for nothing, and the queue stops offering that claim to this
+  # operator — which is what keeps a step nobody has defined from being re-read every cycle for ever.
+  def test_a_claim_this_client_cannot_read_is_recorded_as_unreached
+    session = fake_session([REPORTED])
+    session.scenario_pages["python"] = [SCENARIO]
+    stub(AgentsMiner::ScenarioRun, :execute, lambda { |_scenario, build:, build_gem: nil|
+      raise AgentsMiner::ScenarioRun::Unreadable,
+        "the scenario asks for setup step \"fixture\", which this client does not run"
+    })
+
+    stats = verifier_for(session).one_cycle
+
+    run = session.calls.find { |call| call[0] == :scenario_run }
+    assert_equal "unreached", run[2]["result"]
+    assert_includes run[2]["detail"], "fixture"
+    assert_equal 1, stats.scenarios
+  end
+
+  # A paused index refuses the run, so the install that would produce one is wasted work — and the
+  # queue is not even asked, which is the cheaper half.
+  def test_a_paused_index_is_not_asked_for_proposals
+    session = fake_session([REPORTED])
+    session.paused = { "python" => true }
+    session.scenario_pages["python"] = [SCENARIO]
+
+    verifier_for(session).one_cycle
+
+    asked = session.calls.select { |call| call[0] == :scenario_queue }.map { |call| call[1] }
+    refute_includes asked, "python"
+    refute(session.calls.any? { |call| call[0] == :scenario_run })
+  end
+
+  # A dry run reads the queue and executes nothing: what it prints is what it would do.
+  def test_a_dry_run_executes_no_claim
+    session = fake_session([REPORTED])
+    session.scenario_pages["python"] = [SCENARIO]
+
+    stats = verifier_for(session, dry_run: true).one_cycle
+
+    assert_equal 0, stats.scenarios
+    refute(session.calls.any? { |call| call[0] == :scenario_run })
   end
 end

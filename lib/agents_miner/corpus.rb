@@ -302,6 +302,24 @@ module AgentsMiner
 
     def release(report_id) = request("POST", "/api/reports/#{report_id}/release")
 
+    # One scenario with the runs recorded against it.
+    #
+    # A report's detail carries only the citation — its id, the probe and how many runs reached — so
+    # a caller that means to *execute* the claim reads the steps here. Anonymous, like every other
+    # read on this surface: a claim is worth citing by anyone.
+    def scenario(scenario_id) = request("GET", "/api/scenarios/#{scenario_id}")
+
+    # The proposals nobody has executed, as one page of work.
+    #
+    # `state=unrun` is "no reached run", and with the key this client presents it also excludes the
+    # claims this operator has already answered — an `unreached` run is this machine's answer, so the
+    # queue does not offer it back and a claim that cannot be built here costs one attempt rather
+    # than one per cycle.
+    def scenario_queue(ecosystem:, limit: 3)
+      request("GET", "/api/scenarios",
+        params: { "state" => "unrun", "ecosystem" => ecosystem, "limit" => limit })
+    end
+
     # **A dead end is a request for an experiment, not a shrug.** When the differential names nothing
     # that explains the break, the useful next move is a call whose behaviour differs between the two
     # releases — a scenario a worker can run — so the miner asks the corpus for one instead of

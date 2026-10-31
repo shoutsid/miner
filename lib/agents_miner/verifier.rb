@@ -11,6 +11,7 @@ require_relative "feed"
 require_relative "ledger"
 require_relative "log"
 require_relative "rubyenvs"
+require_relative "scenario_run"
 require_relative "service"
 require_relative "solving"
 require_relative "verifying"
@@ -57,7 +58,7 @@ module AgentsMiner
     # What one cycle confirmed, which is also what its log line says.
     class Stats
       attr_accessor :checked, :reproduced, :partial, :dissent, :no_claim, :skipped, :paused,
-        :notes
+        :scenarios, :notes
 
       def initialize
         @checked = 0
@@ -66,6 +67,9 @@ module AgentsMiner
         @dissent = 0
         @no_claim = 0
         @skipped = 0
+        # Claims executed rather than reports checked: a scenario run is how a proposal becomes
+        # evidence, so it is its own number rather than folded into `checked`.
+        @scenarios = 0
         # Reports left in the backlog because their index is not collecting. They are not skipped
         # work — the report is good and the corpus is not taking a vote — so they get their own
         # number rather than inflating `skipped`, which means the release could not be built.
@@ -79,6 +83,7 @@ module AgentsMiner
       def summary
         line = "#{@checked} report(s) checked: #{@reproduced} reproduced, #{@partial} partial, " \
           "#{@dissent} dissented, #{@no_claim} not checkable, #{@skipped} skipped"
+        line = "#{line}, #{@scenarios} scenario(s) executed" if @scenarios.positive?
         @paused.positive? ? "#{line}, #{@paused} left for a paused index" : line
       end
     end
@@ -262,6 +267,9 @@ module AgentsMiner
                        "#{gem_scratch_free / (1024 * 1024)} MB"
       end
 
+      # Before the checks, because a claim somebody proposed is cheaper than re-deriving the report
+      # that cites it — and because a run of it writes the verification the report was waiting for.
+      run_scenarios(stats)
       work = to_check(stats)
       check_all(work, stats) unless work.empty?
       unless @writes.unlimited?
@@ -608,6 +616,82 @@ module AgentsMiner
       ""
     end
 
+    # --- executing the claims somebody proposed ------------------------------
+
+    # How many claims one cycle executes, per index.
+    #
+    # Small on purpose: a proposal is one install of two releases, the same cost as a check, and the
+    # queue is a convenience rather than the job. A verification a report is waiting for and a
+    # proposal that would give it one are both installs, and the checks come first.
+    SCENARIO_LIMIT = 3
+
+    # **The claims somebody proposed and nobody has executed, read as a queue.**
+    #
+    # The corpus answers this directly (`GET /api/scenarios?state=unrun`), which is why this loop does
+    # not walk open reports looking for citations: the feed's status filter exists so a cycle does not
+    # spend its reads on reports that cannot be confirmed, and an open report — a break with no fix,
+    # which is what a hypothesis is about — is exactly one of those. With a key the answer excludes
+    # the claims this operator has already run, including the ones it could not execute, so a claim
+    # this machine cannot build is not paid for again.
+    #
+    # Nothing is voted here. The write is the *run*, and the service turns a reached run whose probe
+    # changed into an ordinary `reproduced` verification on every report citing the scenario, through
+    # the counting rule every other verification follows. A verifier that also called `verify` would
+    # be recording its own opinion twice.
+    def run_scenarios(stats)
+      @ecosystems.each do |ecosystem|
+        break unless @writes.allow
+        next if paused?(ecosystem.name)
+
+        queue = @session.scenario_queue(ecosystem: ecosystem.name, limit: SCENARIO_LIMIT)
+        Array(queue["items"]).each do |scenario|
+          break unless @writes.allow
+
+          execute_scenario(scenario, stats)
+        end
+      end
+    rescue Errors::RateLimited
+      # Nothing was written, so the next cycle asks again and the loop waits the quota out.
+      raise
+    rescue Errors::CollectionPaused => e
+      stats.notes << "the scenario queue is paused: #{e.message}"
+    rescue Errors::CorpusError => e
+      stats.notes << "could not read the scenario queue: #{e.message}"
+    end
+
+    def execute_scenario(scenario, stats)
+      scenario_id = scenario["id"].to_s
+      if @dry_run
+        logger.info("would run scenario %s", scenario_id)
+        return
+      end
+
+      body = begin
+        ScenarioRun.execute(scenario, build: method(:build), build_gem: method(:build_gem))
+      rescue ScenarioRun::Unreadable => e
+        # **A claim this client cannot read is answered as `unreached`, not skipped.** The service
+        # stores it and counts it for nothing — an install that never happened is not a refutation —
+        # and the queue stops offering it to this operator, which is the half that keeps a step
+        # nobody defined from being re-read every cycle for ever.
+        { "result" => "unreached",
+          "detail" => "This client cannot execute the scenario: #{e.message}"[0, 2_000] }
+      end
+
+      @session.post_scenario_run(scenario_id, body)
+      stats.scenarios += 1
+      logger.info("scenario %s: %s (%s)", scenario_id, body["result"], body["detail"])
+    rescue Errors::CollectionPaused => e
+      @paused[scenario["ecosystem"].to_s] = true
+      stats.paused += 1
+      logger.info("collection paused; leaving scenario %s for when it resumes (%s)",
+        scenario_id, e.message)
+    rescue Errors::RateLimited
+      raise
+    rescue Errors::CorpusError => e
+      stats.skipped += 1
+      logger.warning("could not run scenario %s: %s", scenario_id, e.message)
+    end
+
     # How a version becomes an environment.
     #
     # Passed into `Verifying` rather than imported there, so the module that decides what a claim
@@ -742,6 +826,7 @@ module AgentsMiner
     end
 
     private :build, :build_gem, :record, :examine, :check_all, :to_check, :refresh, :touch, :wait,
-      :note_failed_build, :sibling_failure, :unbuildable_for, :machine_for
+      :note_failed_build, :sibling_failure, :unbuildable_for, :machine_for, :run_scenarios,
+      :execute_scenario
   end
 end

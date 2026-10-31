@@ -5,6 +5,14 @@ its image and its command line.
 
 ## [Unreleased]
 
+### Added
+
+- A verifier executes the claims somebody proposed. `GET /api/scenarios?state=unrun` is a queue of
+  scenarios nobody has reached, and the verifier runs each one's own steps against both releases and
+  records the run, which the service turns into the ordinary `reproduced` verification. A claim this
+  client cannot read is recorded as `unreached` with the step named, never skipped silently, and a
+  claim it could not build is not offered back to it.
+
 ### Changed
 
 - The project is **Agents**. The client is `agents-miner`, the namespace is `AgentsMiner`, the

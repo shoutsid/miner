@@ -155,6 +155,7 @@ lib/agents_miner/
   corpus.rb                      the service client
   reporting.rb                   report payloads and summaries
   solving.rb, verifying.rb       report selection and claim execution
+  scenario_run.rb                a proposed claim, executed as written
   findings.rb, pair.rb           the data the cycle moves around
   advisories.rb                  reviewed advisory leads
   watchlist.rb                   queue + ranking
