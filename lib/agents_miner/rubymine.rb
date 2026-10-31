@@ -57,7 +57,10 @@ module AgentsMiner
         older = old_inventory.by_name
         newer = new_inventory.by_name
         symbols(before, after, older, newer, limit: limit, suffix: suffix) +
-          keywords(before, after, older, newer, limit: limit, suffix: suffix)
+          keywords(before, after, older, newer, limit: limit, suffix: suffix) +
+          # The values, which cost no probe at all: both inventories already read the gem's own
+          # constants, so the comparison is two maps rather than two more Ruby launches.
+          Behaviour.observations(old_inventory, new_inventory)
       end
 
       # Where the new release defines a name of the same leaf, confirmed by running it.

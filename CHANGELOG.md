@@ -21,6 +21,12 @@ its image and its command line.
 
 ### Added
 
+- **A value that changed under an unchanged name.** The differentials compare surfaces — names and
+  signatures — so a release that keeps both and changes what a name *is* was invisible. `Behaviour`
+  compares the `type` and `repr` of the attributes both inventories already read, and files a
+  `behaviour_changed` finding carrying both readings. No call is made and no probe is spent: the
+  values come with the inventory the differential takes anyway. The four relations that need a call
+  (idempotence, round-trip, side effects, a call's own error) are deliberately not here.
 - The verifier checks a Rails move that failed while Bundler was resolving versions:
   `as-reported` executes a minimal `bundle lock` naming the two releases, and `searched`
   reads the refused gem's own gemspec rather than the report's quoted constraint. Both use

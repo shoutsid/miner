@@ -200,6 +200,16 @@ module AgentsMiner
     # does not match its own trace.
     def self.attempted_for(finding, from_version:)
       note = finding.notes.first || ""
+      if finding.mechanism == Mechanism::BEHAVIOUR_CHANGED
+        # No call, and the report must not imply one: this finding was established by reading the
+        # same attribute in both environments, which is a comparison of two executions' *values*
+        # and not of two calls' answers.
+        return ("Read `#{finding.library}.#{finding.subject}` from each release without calling " \
+                "it: #{finding.library} #{from_version} had #{finding.accepted_output}, and " \
+                "#{finding.library} #{finding.version} has #{finding.observed_after}. The " \
+                "attribute, its name and its signature are unchanged; what it is changed. " \
+                "#{note}").strip
+      end
       if finding.mechanism == Mechanism::SYMBOL_MOVED
         # The evidence for a move is two references: the one that raised where the caller wrote it,
         # and the one that resolved where the release keeps it. A body carrying only the first

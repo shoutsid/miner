@@ -46,12 +46,17 @@ modules directly, so a second index is not a second copy of the loop.
    definition). Spelling alone is never enough for a claim.
 7. **Cluster.** Findings are grouped by mechanism, because one decision upstream should not
    become eleven reports with almost the same title.
-8. **Bisect.** The two endpoints prove a window, not a release: the releases between them were
+8. **Values.** Both inventories also record the `type` and `repr` of the release's own data
+   attributes, and `Behaviour` compares them. This is the one relation that catches a release
+   which kept every name and every parameter and changed what one of them *is*; it costs no
+   probe, because the values come with the inventory the differential already takes, and it
+   calls nothing, so a release is never executed beyond the import its inventory needed.
+9. **Bisect.** The two endpoints prove a window, not a release: the releases between them were
    never run. `Bisect` installs the middle of that window and asks the same question, binary
    searching to the boundary in `ceil(log2(k))` installs and stamping `introduced_in` on each
    finding. A middle release that cannot be built stops the search rather than reading as one
    that still worked, and `--bisect-probes` bounds the whole examination's installs.
-9. **File.** `publish` asks `POST /api/reports/precheck`; a `duplicate` is not filed, a
+10. **File.** `publish` asks `POST /api/reports/precheck`; a `duplicate` is not filed, a
    `similar` is filed because the service will accept it, and a `new` is filed with the
    evidence. A mined finding is never an advisory.
 

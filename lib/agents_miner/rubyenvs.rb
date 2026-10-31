@@ -164,17 +164,24 @@ module AgentsMiner
       end
     end
 
-    # What one release defines, and whether it could be read at all.
+    # What one release defines, whether it could be read at all, and what its own values are.
+    #
+    # `values` is a map of the gem's top-level constants that hold a value rather than a module —
+    # the released string, the default table, the flag — because a signature diff cannot see a
+    # constant whose *content* changed while its name and type stayed. It is kept apart from
+    # `entries` for the reason the Python inventory gives: an entry is a name a caller can hold and
+    # a later release can take away, and a value is a fact about a name that is still there.
     class Inventory
-      attr_reader :package, :version, :entries, :error
+      attr_reader :package, :version, :entries, :error, :values
 
-      def initialize(package:, version:, entries:, loaded:, native: false, error: "")
+      def initialize(package:, version:, entries:, loaded:, native: false, error: "", values: {})
         @package = package
         @version = version
         @entries = entries
         @loaded = loaded
         @native = native
         @error = error
+        @values = values
       end
 
       def loaded? = @loaded
@@ -695,7 +702,7 @@ module AgentsMiner
       Inventory.new(
         package: env.package, version: env.version, entries: entries,
         loaded: !!header["loaded"], native: !!header["native"],
-        error: (header["error"] || "").to_s
+        error: (header["error"] || "").to_s, values: header["values"] || {}
       )
     end
 
@@ -917,8 +924,31 @@ module AgentsMiner
         next unless safe_owner?(full)
         emit.call("constant", full, full, nil, nil)
       end
+      # **What the gem's own constants hold, not only that they exist.** A signature diff reads
+      # methods; a release that changes `Gem::VERSION` from "1.0.0" to "2.0.0", or a default table
+      # from one shape to another, has the same surface and a different meaning. Bounded and absent
+      # rather than truncated: an `inspect` that raises or runs past this is not recorded, because a
+      # clipped rendering would make two different values look alike.
+      values = {}
+      top.each do |const|
+        full = const.to_s
+        next unless safe_owner?(full)
+        value = begin
+          Object.const_get(const)
+        rescue Exception
+          next
+        end
+        next if value.is_a?(Module)
+        rendered = begin
+          value.inspect
+        rescue Exception
+          next
+        end
+        next if rendered.length > 200
+        values[full] = {"type" => value.class.name.to_s, "repr" => rendered}
+      end
       header = {"t" => "header", "loaded" => true, "native" => native,
-                "dir" => dir, "entries" => entries.size}
+                "dir" => dir, "entries" => entries.size, "values" => values}
       puts header.to_json
       entries.first(limit).each { |row| puts row.to_json }
     GEM_INVENTORY

@@ -294,6 +294,43 @@ module AgentsMiner
           return found
 
 
+      # **What this release's own values *are*, for the comparison no signature can make.**
+      #
+      # A differential reads names and parameters. A release that changes `numpy.pi` from one
+      # kind of number to another, or an exported table from a dict to an ordered one, has an
+      # identical surface and a different meaning — and nothing in a signature diff can see it.
+      # Reading `type` and `repr` of a value the import already touched is the cheapest
+      # metamorphic observation there is: no call site, no argument, and no module imported that
+      # `dir(module)` has not already imported.
+      #
+      # Bounded, and absent rather than approximate: a `repr` that raises or that is longer than
+      # this is not recorded at all, because a truncated or empty rendering would make two
+      # different values look the same. A release's module-level constants are mostly small, so
+      # the bound costs nothing real.
+      def shape_of(obj):
+          try:
+              rendered = repr(obj)
+          except BaseException:
+              return None
+          if len(rendered) > 200:
+              return None
+          return {"type": type(obj).__name__, "repr": rendered}
+
+
+      values = {}
+      for attribute in dir(module):
+          if attribute.startswith("_"):
+              continue
+          try:
+              obj = getattr(module, attribute)
+          except BaseException:
+              continue
+          if inspect.ismodule(obj) or inspect.isroutine(obj) or inspect.isclass(obj):
+              continue
+          shape = shape_of(obj)
+          if shape is not None:
+              values[attribute] = shape
+
       inventory = []
       for attribute in dir(module):
           if attribute.startswith("_"):
@@ -316,7 +353,7 @@ module AgentsMiner
           # later call site has to write. `import pyyaml` does not work, and a probe
           # built from the distribution name would report a package that cannot be
           # imported by anybody — which is this bug, one layer down.
-          json.dump({"module": package, "entries": inventory}, handle)
+          json.dump({"module": package, "entries": inventory, "values": values}, handle)
     PY
 
     # A dotted reference read as a *path*: `sqlalchemy.sql.schema.IdentityOptions` is an import
@@ -1041,11 +1078,25 @@ module AgentsMiner
           release: release_of(env.package, env.version))
       end
 
-      Inventory.new(module: payload["module"], entries: payload["entries"])
+      Inventory.new(module: payload["module"], entries: payload["entries"],
+        values: payload["values"] || {})
     end
 
-    # What one release exports, and the name it exports it under.
-    Inventory = Data.define(:module, :entries)
+    # What one release exports, the name it exports it under, and what its own values are.
+    #
+    # `values` is separate from `entries` rather than a kind of entry: an entry is something a
+    # caller can name and a later release can take away, and a data attribute cannot be "removed"
+    # without the name being gone — which the symbol pass already reports. Keeping the two maps
+    # apart is what lets the behaviour comparison add knowledge without widening the vocabulary of
+    # removals a report can make.
+    Inventory = Data.define(:module, :entries, :values) do
+      # `values` defaults to empty rather than being required: an inventory taken before this field
+      # existed is still an inventory of a surface, and a caller that builds one by hand — a test, a
+      # probe that could not read the values — is describing exactly that.
+      def initialize(module:, entries:, values: {})
+        super
+      end
+    end
 
     # A caller's line, as a caller would have written it.
     #

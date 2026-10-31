@@ -177,7 +177,10 @@ module AgentsMiner
       end
 
       found + symbols_between(before, after, module_name, older, newer,
-        limit: SYMBOL_LIMIT, suffix: suffix)
+        limit: SYMBOL_LIMIT, suffix: suffix) +
+        # The values this pass already read, compared. No probe is spent: both inventories were
+        # taken to answer the two questions above, and the value map came with them.
+        Behaviour.observations(old_inventory, new_inventory)
     end
 
     # Every public name the older release exported and the newer one does not.

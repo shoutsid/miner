@@ -44,8 +44,18 @@ module AgentsMiner
     # Different from a removal for the same reason a rename is: the fix exists, and "pin below this
     # release" would be the wrong advice.
     SYMBOL_MOVED = "symbol_moved"
+    # The name and the signature are identical; what the name *is* changed. A constant that held a
+    # string and now holds a table, a value whose class moved, a default whose rendering differs:
+    # nothing a signature diff reads can see it, and a caller finds out at run time.
+    #
+    # One value rather than one per relation: which comparison established it — the type or the
+    # rendering — is in the finding's prose, while the change a caller has to act on is the same for
+    # both. A vocabulary that grew a value per relation would make querying the corpus harder for a
+    # distinction no caller branches on.
+    BEHAVIOUR_CHANGED = "behaviour_changed"
 
-    ALL = [PARAMETER_RENAMED, PARAMETER_REMOVED, SYMBOL_RENAMED, SYMBOL_REMOVED, SYMBOL_MOVED].freeze
+    ALL = [PARAMETER_RENAMED, PARAMETER_REMOVED, SYMBOL_RENAMED, SYMBOL_REMOVED, SYMBOL_MOVED,
+           BEHAVIOUR_CHANGED].freeze
 
     def self.valid?(value) = ALL.include?(value)
 
@@ -85,14 +95,14 @@ module AgentsMiner
   class Observation
     FIELDS = %i[
       symbol parameter exception accepted_before accepted_after
-      repair candidate moved traceback accepted_output kind
+      repair candidate moved traceback accepted_output kind relation observed_after
     ].freeze
 
     attr_reader(*FIELDS)
 
     def initialize(symbol:, parameter:, exception:, accepted_before:, accepted_after:,
                    repair: nil, candidate: nil, moved: nil, traceback: "",
-                   accepted_output: "", kind: "argument")
+                   accepted_output: "", kind: "argument", relation: nil, observed_after: "")
       @symbol = symbol
       @parameter = parameter
       @exception = exception
@@ -116,6 +126,11 @@ module AgentsMiner
       # something a call site passes, a symbol is something an import names — so it is a field
       # rather than something inferred from whether `parameter` happens to be empty.
       @kind = kind
+      # Which comparison a behaviour observation was made under, and what the newer release's value
+      # rendered as. Both are empty for the argument and symbol passes, which establish their
+      # claims by executing a reference rather than by reading a value.
+      @relation = relation
+      @observed_after = observed_after
       freeze
     end
 
@@ -145,14 +160,14 @@ module AgentsMiner
       :ecosystem, :runtime, :parameter, :symbol, :replacement,
       :refused_candidate, :moved, :signatures, :call_sites,
       :repaired_call_sites, :trace, :notes, :exception, :accepted_output, :callable, :duration_ms,
-      :introduced_in
+      :introduced_in, :relation, :observed_after
 
     def initialize(library: nil, module_name: "", version: nil, mechanism: nil, title: nil,
                    problem: nil, resolution: nil, ecosystem: "python", runtime: "", parameter: "",
                    symbol: "", replacement: nil, refused_candidate: nil, moved: nil,
                    signatures: [], call_sites: 1, repaired_call_sites: 0, trace: "",
                    notes: [], exception: "", accepted_output: "", callable: "",
-                   duration_ms: 0, introduced_in: nil)
+                   duration_ms: 0, introduced_in: nil, relation: nil, observed_after: "")
       # What pydantic did with a missing field, kept as a refusal rather than a nil: a finding
       # without a title is a request the corpus would answer 422 to, and the miner would learn that
       # after the work of deriving it.
@@ -223,6 +238,11 @@ module AgentsMiner
       # were beyond this cycle's probe budget — and nil must not be read as "nothing before this
       # release breaks", which is what the window the report already carries says it did not check.
       @introduced_in = introduced_in
+      # **What a behaviour finding was established by.** The relation that differed and the newer
+      # release's own rendering of the value: a report whose prose said "the value changed" without
+      # the second half would be a claim with nothing to check it against.
+      @relation = relation
+      @observed_after = observed_after
     end
 
     # What this release took away, whichever pass established it.
@@ -247,7 +267,8 @@ module AgentsMiner
         "repaired_call_sites" => repaired_call_sites, "trace" => trace, "notes" => notes,
         "exception" => exception, "accepted_output" => accepted_output,
         "callable" => callable, "duration_ms" => duration_ms,
-        "introduced_in" => introduced_in
+        "introduced_in" => introduced_in, "relation" => relation,
+        "observed_after" => observed_after
       }
     end
   end
@@ -288,6 +309,11 @@ module AgentsMiner
   # accepted in the old one's place. Reading a candidate that was tried and refused would call a
   # removal a rename and put the refusal in the title as the answer.
   def self.mechanism_of(observation)
+    # A value that changed under an unchanged name. Asked first because the kind is a third
+    # vocabulary: an argument is something a call passes, a symbol is something an import names, and
+    # a value is neither — it is what one of them turned out to be.
+    return Mechanism::BEHAVIOUR_CHANGED if observation.kind == Behaviour::KIND
+
     if observation.kind == "symbol"
       return Mechanism::SYMBOL_MOVED unless observation.moved.to_s.empty?
 
@@ -361,6 +387,16 @@ module AgentsMiner
           "name from `#{where}`; reading it there was executed against the new release and " \
           "resolved. Nothing about the name itself changed."
         ]
+      when Mechanism::BEHAVIOUR_CHANGED
+        [
+          "#{library} #{version} changed what #{written} is",
+          "`#{written}` was #{group[0].accepted_output} on #{from_version} and is " \
+          "#{group[0].observed_after} on #{library} #{version}. No name and no parameter changed, " \
+          "so a signature comparison cannot see this: the release kept the surface and changed the " \
+          "value behind it. Nothing here was called — the two values were read from each release's " \
+          "own attributes — so read the #{version} changelog, and pin below #{version} if the " \
+          "value is load-bearing."
+        ]
       when Mechanism::SYMBOL_RENAMED
         [
           "#{library} #{version} renamed #{written} to #{replacement}",
@@ -394,7 +430,8 @@ module AgentsMiner
       problem: problem,
       resolution: resolution,
       parameter: group[0].parameter,
-      symbol: Mechanism.symbol?(mechanism) ? group[0].symbol : "",
+      symbol: Mechanism.symbol?(mechanism) || mechanism == Mechanism::BEHAVIOUR_CHANGED ?
+        group[0].symbol : "",
       replacement: replacement,
       refused_candidate: refused.empty? ? nil : refused[0],
       moved: mechanism == Mechanism::SYMBOL_MOVED ? group[0].moved : nil,
@@ -408,7 +445,10 @@ module AgentsMiner
       # a call finding was made against; a symbol finding's name is already `symbol`.
       exception: observed.exception.to_s,
       accepted_output: observed.accepted_output.to_s,
-      callable: Mechanism.symbol?(mechanism) ? "" : observed.symbol.to_s,
+      callable: Mechanism.symbol?(mechanism) || mechanism == Mechanism::BEHAVIOUR_CHANGED ?
+        "" : observed.symbol.to_s,
+      relation: observed.kind == Behaviour::KIND ? observed.relation : nil,
+      observed_after: observed.kind == Behaviour::KIND ? observed.observed_after.to_s : "",
       trace: observed.traceback.to_s.strip
     )
   end
@@ -454,6 +494,14 @@ module AgentsMiner
                        ecosystem: "python")
     ruby = ecosystem == "ruby"
     written = ruby ? subject : "#{library}.#{subject}"
+    if observed.kind == Behaviour::KIND
+      return "Upgrading #{library} from #{from_version} to #{version} breaks code that reads " \
+             "`#{written}`, and no name or signature changed. Read from both releases by " \
+             "evaluating the attribute in each: it was #{observed.accepted_output} on " \
+             "#{from_version} and is #{observed.observed_after} on #{version}. The relation that " \
+             "differed is `#{observed.relation}`."
+    end
+
     if observed.kind == "symbol"
       source = ruby ? "the gem's own definitions" : "the package's own exports"
       return "Upgrading #{library} from #{from_version} to #{version} breaks code that names " \
