@@ -95,6 +95,35 @@ class ReportingTest < MinerTest
       from_version: "0.27.2")
   end
 
+  def test_a_ruby_finding_proposes_the_class_the_interpreter_trailed
+    # Ruby writes the class at the end of the message, so the colon rule read `undefined method
+    # 'x' for Y (NoMethodError)` as a class called `undefined method 'x' for Y (NoMethodError)` —
+    # and before the reading was fixed it read the probe's own frame. `raises_class` can only
+    # compare a class, so anything else is a proposal every run answers `unknown`.
+    ruby = summarise("flipper", "0.25.4", "0.24.1",
+      [AgentsMiner::Observation.new(symbol: "Flipper::UI.feature_creation_enabled", parameter: "-",
+        exception: "undefined method `feature_creation_enabled' for Flipper::UI:Module (NoMethodError)",
+        accepted_before: true, accepted_after: false, traceback: "probe.rb:6")],
+      ecosystem: "ruby")
+    proposal = REPORTING.scenario_proposal_for(ruby, from_version: "0.24.1")
+
+    assert_equal "NoMethodError", proposal["probe"]["expected"]
+    assert_equal "NoMethodError", REPORTING.scenario_run_for(ruby)["to_output"]["raised"]
+    assert_equal "ruby", proposal["ecosystem"]
+  end
+
+  def test_a_ruby_parse_failure_proposes_no_scenario
+    # A syntax error names its file and no class. There is nothing to assert, and a blank expected
+    # value would be a claim a verifier could neither confirm nor refute.
+    broken = summarise("flipper", "0.25.4", "0.24.1",
+      [AgentsMiner::Observation.new(symbol: "Flipper::UI", parameter: "-",
+        exception: "syntax error, unexpected end-of-input",
+        accepted_before: true, accepted_after: false, traceback: "probe.rb:3")],
+      ecosystem: "ruby")
+
+    assert_nil REPORTING.scenario_proposal_for(broken, from_version: "0.24.1")
+  end
+
   def test_a_finding_with_no_observed_import_name_sends_no_field
     refute payload_for(a_finding, "0.27.2").key?("module_name")
   end

@@ -175,10 +175,19 @@ module AgentsMiner
       body
     end
 
-    # The exception's class, which is what `raises_class` asserts. The observation carries the
-    # interpreter's whole line (`TypeError: ...`), and the class is the part before the first colon.
+    # The exception's class, which is what `raises_class` asserts.
+    #
+    # The two interpreters put it in different places, and reading one shape with the other's rule
+    # is how a Ruby finding came to propose a path fragment as the class it expected: Python leads
+    # with the class (`TypeError: ...`), Ruby trails with it in parentheses
+    # (`undefined method 'x' for Y (NoMethodError)`). A proposal whose expected value is not a
+    # class is a claim no run can confirm, so when Ruby's message carries no class at all — a
+    # syntax error — the answer is blank and no scenario is proposed.
     def self.exception_class(finding)
-      finding.exception.to_s.split(":", 2).first.to_s.strip
+      line = finding.exception.to_s.strip
+      return line[/\(([A-Za-z0-9_:]+)\)\z/, 1].to_s if finding.ecosystem.to_s == "ruby"
+
+      line.split(":", 2).first.to_s.strip
     end
 
     # The call a scenario makes, in the two shapes the differential establishes.

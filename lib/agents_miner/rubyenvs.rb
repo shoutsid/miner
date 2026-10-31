@@ -599,10 +599,23 @@ module AgentsMiner
     # rather than from an exit code a wrapper reports.
     def self.resolves?(output) = output.to_s.strip.empty?
 
-    # The last non-blank line, which is the exception a caller has to act on.
+    # The exception a caller has to act on: the message, without the frame it was raised in.
+    #
+    # Ruby prints the exception *first* and the `from` frames after it, which is the opposite of
+    # Python — so the last non-blank line of a real probe is `from probe.rb:6:in '<main>'`, a
+    # citation of this machine's harness rather than a refusal. Reading that line gave every Ruby
+    # report a `problem` quoting its own probe file, and gave every scenario built from one an
+    # expected class of that frame, which no run could ever satisfy. (`Envs.exception_line` takes
+    # the last line for the same reason these are two functions and not one.)
+    #
+    # The location prefix goes too: the probe's file name and line number are the layout this
+    # machine chose, while what follows them is what the interpreter said, which is also the
+    # sentence `raises_class` compares against. A syntax error prints the location without the
+    # `in` phrase and is stripped the same way.
     def self.exception_line(output)
       lines = output.to_s.strip.split("\n").map(&:strip).reject(&:empty?)
-      lines.empty? ? "" : lines.last
+      line = lines.first.to_s
+      line.sub(%r{\A\S+?:\d+:}, "").sub(/\Ain [`'][^']*':\s*/, "").strip
     end
 
     # The interpreter's own error text, with this machine's paths removed.

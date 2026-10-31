@@ -120,6 +120,29 @@ class RubyEnvsTest < MinerTest
     refute R.refused_symbol?(gone_33, "JSON.other_method")
   end
 
+  def test_the_exception_line_is_the_message_rather_than_the_deepest_frame
+    # Ruby prints the exception first and the `from` frames after it, so the last line of a real
+    # probe names this machine's file and line — not the refusal. This is the line a report quotes
+    # as its problem and the line a scenario's expected class is read from, so reading the frame
+    # gave both the harness's address instead of a claim.
+    raised = "probe.rb:6:in `<main>': undefined method `feature_creation_enabled' for " \
+      "Flipper::UI:Module (NoMethodError)\n\tfrom probe.rb:9:in `<main>'\n"
+
+    assert_equal "undefined method `feature_creation_enabled' for Flipper::UI:Module (NoMethodError)",
+      R.exception_line(raised)
+  end
+
+  def test_a_syntax_error_keeps_its_message_and_loses_the_location
+    # No `in ...` phrase on a parse failure, and no class either: the location still goes, and what
+    # is left is what a reader can act on.
+    assert_equal "syntax error, unexpected end-of-input",
+      R.exception_line("probe.rb:3: syntax error, unexpected end-of-input\n")
+  end
+
+  def test_a_run_that_said_nothing_has_no_exception_line
+    assert_equal "", R.exception_line("  \n")
+  end
+
   def test_a_keyword_that_went_away_is_read_from_the_keyword_not_the_phrase
     # Ruby says `unknown keyword: :x` for a method and `unknown keywords: :x, :y` for a `Struct`
     # or `Data`, so the phrase alone would call every multi-keyword refusal a refusal of any

@@ -22,6 +22,11 @@ its image and its command line.
 
 ### Fixed
 
+- A Ruby report quotes the refusal rather than the frame it was raised in. Ruby prints the exception
+  first and the `from` frames after it, so reading the last non-blank line gave every gem finding a
+  `problem` that read `from probe.rb:6:in '<main>'`, and gave every scenario proposed from one an
+  expected class of that frame — a claim no run could satisfy, and one a verifier could only answer
+  `unknown`. The location prefix is stripped too, so what a reader sees is what the interpreter said.
 - `mine` prints a differential without registering an operator or filing a report. It shared
   the `publish` path and did both, which contradicted its documented job.
 - The duplicated `serve` dispatch in `Cli.main` is removed; it was a no-op with two identical
