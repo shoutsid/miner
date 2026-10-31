@@ -101,6 +101,13 @@ module AgentsMiner
     # refused.
     REQUIREMENTS_PAGE = 500
 
+    # How many bytes of a page one facts write may carry. The service refuses a body over 64 KiB
+    # (`payload_too_large`), and a release is not a fixed size: 500 `logstash-*` or `dependabot-*`
+    # releases, each declaring a long dependency list, are past it — measured on the deployment,
+    # where the count-only page was believed to be the bound and every one of those gems was
+    # refused in full. The budget is the cap less room for the envelope around the list.
+    REQUIREMENTS_BYTES = 48 * 1024
+
     # How many cached gems' requirements one cycle may settle. A bound on a *cycle*, not on a
     # position: the set is a few hundred requests against a 60,000/hour write quota, so the pass
     # wants to finish in minutes rather than to ration itself — it exists to repair a gap left by
@@ -763,10 +770,11 @@ module AgentsMiner
     # miner look healthy while every later write is also refused.
     #
     # Paged, because one request is bounded and a gem's history is not: the service takes at most
-    # `REQUIREMENTS_PAGE` releases per request, and the largest gems here declare thousands. Sending
-    # the whole history in one body was refused for every gem past 500 releases — 422 on the item cap
-    # or 413 on the body cap — so the facts for exactly the gems with the most to say were never
-    # recorded.
+    # `REQUIREMENTS_PAGE` releases and `REQUIREMENTS_BYTES` of body per request, and the largest gems
+    # here declare thousands. Sending the whole history in one body was refused for every gem past
+    # 500 releases — 422 on the item cap or 413 on the body cap — so the facts for exactly the gems
+    # with the most to say were never recorded. The count alone was not the whole bound: see
+    # `pages_of`.
     def record_requirements(package)
       return true if @requirements_settled.include?(package)
 
@@ -797,7 +805,7 @@ module AgentsMiner
         { "version" => version, "ruby_requirement" => fact["ruby_requirement"],
           "dependencies" => fact["dependencies"] }
       end
-      pages.each_slice(REQUIREMENTS_PAGE) do |page|
+      pages_of(package, pages).each do |page|
         @session.record_release_facts(package, page)
       rescue Errors::RateLimited, Errors::CollectionPaused
         # Re-raised, both of them, and for the same reason: the handler below logs this and
@@ -815,6 +823,35 @@ module AgentsMiner
       end
       @requirements_settled << package
       true
+    end
+
+    # The pages one gem's history goes out in: at most `REQUIREMENTS_PAGE` releases, and at most
+    # `REQUIREMENTS_BYTES` of JSON. Both bounds are the service's, restated here so a page is cut
+    # before it is refused rather than after.
+    #
+    # A release that alone exceeds the budget still goes, alone, and says so: splitting it is not
+    # possible, and dropping it in silence would leave the corpus believing it had been told what
+    # this gem declares.
+    def pages_of(package, rows)
+      pages = []
+      page = []
+      bytes = 0
+      rows.each do |row|
+        size = JSON.generate([row]).bytesize
+        if size > REQUIREMENTS_BYTES
+          @log.warning("%s %s declares %d bytes of dependencies, past the %d one facts write may carry",
+            package, row["version"], size, REQUIREMENTS_BYTES)
+        end
+        if !page.empty? && (page.length >= REQUIREMENTS_PAGE || bytes + size > REQUIREMENTS_BYTES)
+          pages << page
+          page = []
+          bytes = 0
+        end
+        page << row
+        bytes += size
+      end
+      pages << page unless page.empty?
+      pages
     end
 
     # Every gem whose RubyGems document this deployment has already read.

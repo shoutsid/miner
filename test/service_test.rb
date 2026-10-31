@@ -315,7 +315,7 @@ class ServiceTest < MinerTest
   # is what the facts are read from now that they carry dependencies. Both, because the
   # production path fetches the index once and caches it, and a test that left it out would
   # reach the network.
-  def cached_gem(home, package, releases)
+  def cached_gem(home, package, releases, dependencies: 1)
     FileUtils.mkdir_p(home + "index")
     (home + "index" + "#{package}#{AgentsMiner::RubyVersions::CACHE_SUFFIX}").write(
       JSON.generate(
@@ -324,7 +324,8 @@ class ServiceTest < MinerTest
         end
       )
     )
-    lines = Array.new(releases) { |index| "1.0.#{index} rack:~> 1.0|checksum:aa,ruby:>= 2.7.0" }
+    declared = Array.new(dependencies) { |index| "dep#{index}:~> 1.0" }.join(",")
+    lines = Array.new(releases) { |index| "1.0.#{index} #{declared}|checksum:aa,ruby:>= 2.7.0" }
     (home + "index" + "#{package}#{AgentsMiner::RubyIndex::CACHE_SUFFIX}").write(lines.join("\n"))
   end
 
@@ -1087,11 +1088,37 @@ class ServiceTest < MinerTest
     miner.record_requirements("big-gem")
 
     pushes = session.calls.select { |call| call.first == "facts" }
-    # Every page full but the last, and every release in exactly one of them.
-    assert_equal [Service::REQUIREMENTS_PAGE, 7], pushes.map { |call| call[2].length }
+    # Both bounds hold on every page, there is more than one of them, and every release is in
+    # exactly one — which is the claim; how many releases fit is the pipeline's business.
+    assert_operator pushes.length, :>, 1
+    pushes.each do |call|
+      assert_operator call[2].length, :<=, Service::REQUIREMENTS_PAGE
+      assert_operator JSON.generate(call[2]).bytesize, :<=, Service::REQUIREMENTS_BYTES
+    end
     sent = pushes.flat_map { |call| call[2].map { |fact| fact["version"] } }
     assert_equal (0...count).map { |index| "1.0.#{index}" }.sort, sent.sort
     assert_equal sent.length, sent.uniq.length
+  end
+
+  def test_a_gem_whose_releases_declare_long_dependency_lists_is_paged_by_size
+    # The count was not the whole bound. A release is not a fixed size, and 500 `logstash-*` or
+    # `dependabot-*` releases declare tens of dependencies each — past the service's 64 KiB body
+    # cap, so on the deployment every one of those gems was refused whole (413) while the page was
+    # believed to fit. A page is cut by bytes as well as by count, and every release still reaches
+    # the service in exactly one of them.
+    count = 60
+    cached_gem(@home, "fat-gem", count, dependencies: 200)
+    session = FakeSession.new(one_page)
+    miner = make(session)
+
+    miner.record_requirements("fat-gem")
+
+    pushes = session.calls.select { |call| call.first == "facts" }
+    assert_operator pushes.length, :>, 1, "one page of this gem is past the body cap"
+    pushes.each do |call|
+      assert_operator JSON.generate(call[2]).bytesize, :<=, Service::REQUIREMENTS_BYTES
+    end
+    assert_equal count, pushes.sum { |call| call[2].length }
   end
 
   def test_a_page_the_corpus_could_not_take_leaves_the_gem_to_be_sent_again
