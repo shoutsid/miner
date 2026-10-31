@@ -132,6 +132,17 @@ class RubyEnvsTest < MinerTest
       R.exception_line(raised)
   end
 
+  def test_a_reference_probe_s_exception_loses_its_eval_wrapper_too
+    # A symbol probe evaluates the reference, so Ruby names the file twice. Copied from a run of
+    # `RubyEnvs.probe` against flipper 0.25.4: the path is this machine's cache, and a report that
+    # quoted it would be quoting a directory no reader has.
+    raised = "(eval at /home/miner/.cache/agents-miner/rubyenvs/flipper-0.25.4/probe-proof.rb:6):" \
+      "1:in `<main>': uninitialized constant Flipper::UI (NameError)\n" \
+      "\tfrom /home/miner/.cache/agents-miner/rubyenvs/flipper-0.25.4/probe-proof.rb:6:in `eval'\n"
+
+    assert_equal "uninitialized constant Flipper::UI (NameError)", R.exception_line(raised)
+  end
+
   def test_a_syntax_error_keeps_its_message_and_loses_the_location
     # No `in ...` phrase on a parse failure, and no class either: the location still goes, and what
     # is left is what a reader can act on.

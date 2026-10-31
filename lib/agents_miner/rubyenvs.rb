@@ -612,10 +612,15 @@ module AgentsMiner
     # machine chose, while what follows them is what the interpreter said, which is also the
     # sentence `raises_class` compares against. A syntax error prints the location without the
     # `in` phrase and is stripped the same way.
+    #
+    # A reference probe reports itself one level deeper, because it evaluates the reference:
+    # `(eval at /root/envs/…/probe-1.rb:6):1:in '<main>':` — that wrapper is the same fact about
+    # this machine and goes with the rest of it. Both shapes are in the tests, copied from real
+    # runs, because a rule that only handled the first left every report with a cache path in it.
     def self.exception_line(output)
       lines = output.to_s.strip.split("\n").map(&:strip).reject(&:empty?)
       line = lines.first.to_s
-      line.sub(%r{\A\S+?:\d+:}, "").sub(/\Ain [`'][^']*':\s*/, "").strip
+      line.sub(/\A(?:\(eval at [^)]*\))?\S*?:\d+:/, "").sub(/\Ain [`'][^']*':\s*/, "").strip
     end
 
     # The interpreter's own error text, with this machine's paths removed.
