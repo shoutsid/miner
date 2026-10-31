@@ -58,6 +58,7 @@ this client.
 | `--no-sleep` | `serve` or `verify`: no wait between cycles. Useful for a proof run, not a deployment. |
 | `--heartbeat PATH` | touch this file at the end of every cycle. Default: `<home>/heartbeat`, or `<home>/heartbeat-<role>` for a verifier. |
 | `--workers N` | how many upgrades (or reports) to examine at once. Default: `6`. |
+| `--bisect-probes N` | `serve`: releases to install per crossing to find the one that broke the call. Default: `4`, which is `ceil(log2(k))` for a window of up to sixteen releases. `0` turns the search off and files no `introduced_in`. |
 | `--writes-per-hour N` | this client's own write ceiling. `0` means no self-imposed limit (the default). |
 | `--download-mbps N` | cap this process's downloads, in MB/s. `0` means no cap. |
 | `--log-level LEVEL` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. Default: `INFO`. |

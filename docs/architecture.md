@@ -46,13 +46,20 @@ modules directly, so a second index is not a second copy of the loop.
    definition). Spelling alone is never enough for a claim.
 7. **Cluster.** Findings are grouped by mechanism, because one decision upstream should not
    become eleven reports with almost the same title.
-8. **File.** `publish` asks `POST /api/reports/precheck`; a `duplicate` is not filed, a
+8. **Bisect.** The two endpoints prove a window, not a release: the releases between them were
+   never run. `Bisect` installs the middle of that window and asks the same question, binary
+   searching to the boundary in `ceil(log2(k))` installs and stamping `introduced_in` on each
+   finding. A middle release that cannot be built stops the search rather than reading as one
+   that still worked, and `--bisect-probes` bounds the whole examination's installs.
+9. **File.** `publish` asks `POST /api/reports/precheck`; a `duplicate` is not filed, a
    `similar` is filed because the service will accept it, and a `new` is filed with the
    evidence. A mined finding is never an advisory.
 
 The traceback in a report is the refusing interpreter's own output. The report also carries
 both releases in structured fields (`from_version`, `subject`, `change_kind`) as well as in
-prose, so a caller can ask “what does this upgrade cross?” before the failure happens.
+prose, so a caller can ask “what does this upgrade cross?” before the failure happens — and
+`introduced_in`, when the middle of the window was run, says which release inside that move
+did it.
 
 ## The ledger
 

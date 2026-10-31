@@ -50,6 +50,19 @@ module AgentsMiner
     def self.valid?(value) = ALL.include?(value)
 
     def self.symbol?(value) = value.to_s.start_with?("symbol_")
+
+    # Whether two findings are the same break seen at two releases.
+    #
+    # The bisection asks each release "does this break happen here?", and the answer comes from the
+    # differential that release produces — which names the same subject and may describe it with a
+    # different mechanism: a name removed in 1.3 and renamed in 1.4 is one break with two fixes
+    # inside the window. Comparing the mechanism itself would answer "no" at 1.3 and put the
+    # boundary a release too late, so the family is compared rather than the value.
+    def self.same_break?(left, right)
+      left.library.to_s == right.library.to_s &&
+        left.subject.to_s == right.subject.to_s &&
+        symbol?(left.mechanism) == symbol?(right.mechanism)
+    end
   end
 
   # One call site, and what executing it against each version showed.
@@ -131,14 +144,15 @@ module AgentsMiner
     attr_accessor :library, :module_name, :version, :mechanism, :title, :problem, :resolution,
       :ecosystem, :runtime, :parameter, :symbol, :replacement,
       :refused_candidate, :moved, :signatures, :call_sites,
-      :repaired_call_sites, :trace, :notes, :exception, :accepted_output, :callable, :duration_ms
+      :repaired_call_sites, :trace, :notes, :exception, :accepted_output, :callable, :duration_ms,
+      :introduced_in
 
     def initialize(library: nil, module_name: "", version: nil, mechanism: nil, title: nil,
                    problem: nil, resolution: nil, ecosystem: "python", runtime: "", parameter: "",
                    symbol: "", replacement: nil, refused_candidate: nil, moved: nil,
                    signatures: [], call_sites: 1, repaired_call_sites: 0, trace: "",
                    notes: [], exception: "", accepted_output: "", callable: "",
-                   duration_ms: 0)
+                   duration_ms: 0, introduced_in: nil)
       # What pydantic did with a missing field, kept as a refusal rather than a nil: a finding
       # without a title is a request the corpus would answer 422 to, and the miner would learn that
       # after the work of deriving it.
@@ -204,6 +218,11 @@ module AgentsMiner
       @accepted_output = accepted_output
       @callable = callable
       @duration_ms = duration_ms
+      # **The release that actually broke it, when the bisection established one.** Nil is the honest
+      # answer for a crossing whose middle releases were never run, were not installable here, or
+      # were beyond this cycle's probe budget — and nil must not be read as "nothing before this
+      # release breaks", which is what the window the report already carries says it did not check.
+      @introduced_in = introduced_in
     end
 
     # What this release took away, whichever pass established it.
@@ -227,7 +246,8 @@ module AgentsMiner
         "signatures" => signatures, "call_sites" => call_sites,
         "repaired_call_sites" => repaired_call_sites, "trace" => trace, "notes" => notes,
         "exception" => exception, "accepted_output" => accepted_output,
-        "callable" => callable, "duration_ms" => duration_ms
+        "callable" => callable, "duration_ms" => duration_ms,
+        "introduced_in" => introduced_in
       }
     end
   end

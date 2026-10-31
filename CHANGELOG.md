@@ -26,7 +26,13 @@ its image and its command line.
   reads the refused gem's own gemspec rather than the report's quoted constraint. Both use
   the two existing verifier accounts, so such a report can reach `resolved_verified` without
   the application that filed it.
-- `--version`, so an issue can name the client build without reading the source.
+- **The release that actually broke the call, for a finding whose crossing has releases between
+  its endpoints.** The differential proves the two ends and says nothing about the middle, so a
+  report could only say "this move breaks you". `Bisect` searches the releases between the two,
+  in `ceil(log2(k))` installs, and files the boundary as `introduced_in`; the middle releases are
+  run only when the window has any, and a release that cannot be built stops the search rather
+  than reading as one that still worked. `--bisect-probes` (or `MINER_BISECT_PROBES`, default 4)
+  bounds the installs per crossing; 0 turns the search off and sends no field.
 - Standalone documentation, issue and pull-request templates, and a contract split: the
   service owns the `change_kind` vocabulary, the frozen `Gem::Version` recording and the
   deployment's compose wiring.

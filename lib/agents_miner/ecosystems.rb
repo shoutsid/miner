@@ -50,6 +50,7 @@ module AgentsMiner
   #   name, machine, install_timeout
   #   history(package, home:, refresh:), history_is_cached(package, home:)
   #   crossings(package, history, limit:), pairs_for(package, history, span:)
+  #   releases(history)
   #   advisory_pair(package, history, fixed_in:)
   #   release_date(package, version, home:)
   #   deadline(package, version, home:, rate:, workers:, attempts:)
@@ -95,6 +96,13 @@ module AgentsMiner
       def pairs_for(package, history, span:)
         Versions.pairs_for(package, history, span: span)
       end
+
+      # The history as one ordered list of releases, which is what a bisection indexes into.
+      #
+      # Returned by the index's own ordering rather than sorted by the caller: PyPI's history is
+      # already oldest-first, and a second sort applied here would be a second opinion about the
+      # order of releases the index itself has already decided.
+      def releases(history) = Versions.usable(history)
 
       # No advisory pairs here, and stated rather than omitted because the loop asks every ecosystem
       # the same question: this build ingests the GitHub reviewed advisories for RubyGems only, so
@@ -187,6 +195,14 @@ module AgentsMiner
       def pairs_for(package, history, span:)
         RubyVersions.pairs_for(package, history, span: span).map { |pair| pair.with_ecosystem(name) }
       end
+
+      # The history as one ordered list of releases, oldest first.
+      #
+      # `RubyVersions.usable` is doing real work here that it does not do on the PyPI side: it drops
+      # the spellings RubyGems can serve but a numeric comparison cannot order, then orders what is
+      # left by RubyGems' own rules. A bisection over a list sorted by a different rule probes the
+      # wrong half and reports a boundary that no install would reproduce.
+      def releases(history) = RubyVersions.usable(history)
 
       # The crossing a reviewed advisory's fix landed in, stamped with the index it came from.
       #

@@ -140,6 +140,20 @@ module AgentsMiner
     # finish a large wheel inside any flat timeout.
     DEFAULT_WORKERS = 6
 
+    # How many releases one crossing may install to find the first one that refuses.
+    #
+    # A differential proves the two endpoints and says nothing about the releases between them, so a
+    # finding arriving in a twelve-release window names a range rather than a release. Bisection
+    # turns that into a boundary in `ceil(log2(k))` installs — four for twelve — and this is the
+    # ceiling rather than the number, because the window's size is a fact about the package. Four
+    # covers a window of up to sixteen releases; a larger one gets a boundary this cycle and the
+    # rest next time, or none at all, which is a report that says less rather than one that guesses.
+    #
+    # A ceiling rather than a default of zero because a field nobody fills is a field nobody reads:
+    # the corpus is meant to answer "did this release break me", and four extra installs on the
+    # pairs that already produced a finding is the price of that answer.
+    BISECT_PROBES = 4
+
     # A ceiling on what this container downloads, in MB per second. 0 means none.
     #
     # Off by default, and enforced only when asked for, for the same reason `WRITES_PER_HOUR` is:
@@ -240,14 +254,14 @@ module AgentsMiner
     end
 
     attr_reader :session, :home, :state, :watchlist, :ledger, :ecosystems, :watchlists, :ledgers,
-      :budget, :report_budget, :dry_run, :heartbeat, :writes, :workers,
+      :budget, :report_budget, :dry_run, :heartbeat, :writes, :workers, :bisect_probes,
       :requirements_settled, :requirements_attempted, :operator_id
     attr_accessor :stop
 
     def initialize(session:, home:, state:, watchlist:, ledger:, budget: Planner::DEFAULT_BUDGET,
                    report_budget: 1, dry_run: false, heartbeat: nil,
                    writes_per_hour: WRITES_PER_HOUR, workers: DEFAULT_WORKERS,
-                   ecosystems: nil, watchlists: nil)
+                   bisect_probes: BISECT_PROBES, ecosystems: nil, watchlists: nil)
       @session = session
       @home = Pathname.new(home)
       @state = Pathname.new(state)
@@ -280,6 +294,10 @@ module AgentsMiner
       # this is the only dial that makes the corpus grow faster, and everything else in the loop is
       # deliberately single-threaded.
       @workers = [workers, 1].max
+      # Installs one crossing may spend on finding the release that actually broke it. Zero turns
+      # the search off without turning off the field: a finding keeps `introduced_in` nil, which is
+      # the same statement an unsearched window makes.
+      @bisect_probes = [bisect_probes.to_i, 0].max
       @stop = false
       # What this miner pulled per second over the last cycle, and the raw reading the next one
       # subtracts from. Kept here rather than measured on demand so the window is a cycle — minutes
@@ -997,7 +1015,77 @@ module AgentsMiner
       end
       elapsed = ((monotonic - started) * 1000).round
       findings.each { |finding| finding.duration_ms = elapsed }
+      establish_introductions(pair, before, findings)
       [findings, nil]
+    end
+
+    # **The release that actually broke it, from the releases between the endpoints.**
+    #
+    # The differential proved `from` accepts and `to` refuses; everything between them was never
+    # run, so the report could only say "this move breaks you". This installs the middle of the
+    # window and asks the same question, in `Bisect`'s binary search, and stamps each finding with
+    # the boundary it found.
+    #
+    # Three things bound what this costs, and all three are deliberate:
+    #
+    # * One differential per probed release is shared by every finding of the crossing — the probe
+    #   result is the list of breaks that release produces, and each finding asks whether its own
+    #   subject is in it. Five findings in one crossing therefore do not pay five times for the same
+    #   install.
+    # * `@bisect_probes` bounds the whole examination, not each finding, so a package with many
+    #   breaks cannot multiply the work.
+    # * A probe that fails to build is `nil` to the search, which stops it. An unbuildable middle
+    #   release must not be read as "it still worked there" — that is how a release nobody ran
+    #   becomes an alibi for the one above it.
+    #
+    # Nothing here raises. A bisection is an improvement to a finding the differential already
+    # established, and a pair whose search failed is a pair that filed what it knew.
+    def establish_introductions(pair, from_env, findings)
+      return if @dry_run || @bisect_probes.zero? || findings.empty?
+
+      one = index(pair.ecosystem)
+      releases = one.releases(one.history(pair.package, home: @home, refresh: false))
+      return if releases.empty?
+
+      spent = 0
+      comparisons = {}
+      probe = lambda do |version|
+        next comparisons[version] if comparisons.key?(version)
+        next nil if spent >= @bisect_probes
+
+        spent += 1
+        comparisons[version] = compare_against(pair, from_env, version)
+      end
+
+      findings.each do |finding|
+        result = Bisect.introduced(releases: releases, from_version: pair.from_version,
+          to_version: pair.to_version) do |version|
+          breaks = probe.call(version)
+          breaks&.any? { |other| Mechanism.same_break?(other, finding) }
+        end
+        finding.introduced_in = result.version
+        next unless result.established?
+
+        @log.info("%s %s->%s: introduced in %s (%d probe(s))", pair.package, pair.from_version,
+          pair.to_version, result.version, result.probes.length)
+      end
+    rescue StandardError => e
+      @log.warning("bisecting %s %s->%s failed: %s: %s", pair.package, pair.from_version,
+        pair.to_version, e.class, e.message)
+    end
+
+    # What one middle release does to the from-release's calls, or nil when it cannot be asked.
+    #
+    # Nil rather than an empty list: an install that failed and a release that changed nothing are
+    # two different readings, and a bisection that confused them would report the release above the
+    # failure as the boundary.
+    def compare_against(pair, from_env, version)
+      after = build(pair, version)
+      index(pair.ecosystem).findings(pair.package, pair.from_version, version, from_env, after,
+        suffix: "-bisect-#{version}".tr("/", "_"))
+    rescue StandardError => e
+      @log.warning("cannot probe %s %s: %s", pair.package, version, e.message)
+      nil
     end
 
     # Write down what one examination did, and file what it found.

@@ -115,6 +115,12 @@ module AgentsMiner
       # the corpus's field has a floor of one character, so absence is the statement a finding with
       # no such observation makes.
       body["module_name"] = finding.module_name unless finding.module_name.to_s.empty?
+      # **The release inside the window that actually refuses the call, when one was established by
+      # running the releases between the endpoints.** Left out rather than sent as null when it was
+      # not: `from_version` and `version` already say the window, and a null would read as "the
+      # search ran and found nothing in the middle" when the search may not have run at all. Absence
+      # is the one true statement about both cases — nobody established a boundary.
+      body["introduced_in"] = finding.introduced_in unless finding.introduced_in.to_s.empty?
       body
     end
 

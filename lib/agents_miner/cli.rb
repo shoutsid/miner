@@ -108,7 +108,7 @@ module AgentsMiner
       attr_accessor :command, :package, :top, :queue_pages, :from_version, :to_version, :span,
         :limit, :base_url, :home, :state, :json, :dry_run, :cycles, :ecosystems,
         :budget, :role, :name, :email, :report_budget, :no_sleep, :heartbeat,
-        :workers, :writes_per_hour, :download_mbps, :log_level
+        :workers, :writes_per_hour, :download_mbps, :log_level, :bisect_probes
 
       def initialize(command: nil, package: [], top: nil, queue_pages: QUEUE_PAGES,
                      from_version: nil, to_version: nil, span: 1, limit: 0,
@@ -117,7 +117,8 @@ module AgentsMiner
                      role: Verifying::AS_REPORTED, name: nil, email: nil, report_budget: 1,
                      no_sleep: false, heartbeat: nil, workers: Service::DEFAULT_WORKERS,
                      writes_per_hour: Service::WRITES_PER_HOUR,
-                     download_mbps: Service::DOWNLOAD_MBPS, log_level: "INFO")
+                     download_mbps: Service::DOWNLOAD_MBPS, log_level: "INFO",
+                     bisect_probes: Service::BISECT_PROBES)
         @command = command
         @package = package
         @top = top
@@ -144,6 +145,7 @@ module AgentsMiner
         @writes_per_hour = writes_per_hour
         @download_mbps = download_mbps
         @log_level = log_level
+        @bisect_probes = bisect_probes
       end
 
       # What a mode reads for its own subcommand's identity: `--ecosystems` as the list a run works,
@@ -293,6 +295,9 @@ module AgentsMiner
             "with serve or verify: cap this container's downloads at this many MB/s; 0 means no cap") do |value|
             args.download_mbps = value
           end
+          parser.on("--bisect-probes N", Integer,
+            "with serve: releases to install per crossing to find the one that broke it; " \
+            "0 turns the search off (default #{Service::BISECT_PROBES})") { |value| args.bisect_probes = value }
           parser.on("--log-level LEVEL", "with serve: DEBUG, INFO, WARNING or ERROR") do |value|
             args.log_level = value
           end
@@ -680,6 +685,7 @@ module AgentsMiner
         heartbeat: args.heartbeat || args.home + "heartbeat",
         writes_per_hour: args.writes_per_hour,
         workers: args.workers,
+        bisect_probes: args.bisect_probes,
         ecosystems: indexes,
         watchlists: watchlists
       )

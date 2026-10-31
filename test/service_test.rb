@@ -264,6 +264,10 @@ class ServiceTest < MinerTest
     @replaced << [mod, name, original]
   end
 
+  # A second name, because `replace` closes over `self` and the lambda above is called from the
+  # service's own object.
+  def test_finding = finding
+
   def finding
     Finding.new(
       library: "sqlalchemy",
@@ -347,6 +351,85 @@ class ServiceTest < MinerTest
     miner.build(pair, "2.0.54")
 
     assert_equal [Envs::INSTALL_TIMEOUT], @deadlines
+  end
+
+  # --- the release that broke it ---------------------------------------------------------
+
+  def test_a_finding_names_the_release_that_broke_it_and_not_only_the_move
+    # The finding's own release is 2.0.54, which is where the caller's move ends. The window it
+    # sits in starts at 1.4.54 and passes through 2.0.0, and the differential says the break is
+    # already there — so the report should name 2.0.0 and the payload should carry it, because
+    # "this move breaks you" and "2.0.0 broke it" are different reasons to pin.
+    check = self
+    probes = []
+    replace(AgentsMiner::Mine, :findings_between, lambda do |_library, _from, to, *_envs, **_kwargs|
+      probes << to
+      [check.test_finding]
+    end)
+
+    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.54", to_version: "2.0.54")
+    findings, error = make(FakeSession.new(one_page)).examine(pair)
+
+    assert_nil error
+    # The first entry is the differential the cycle asked for; the second is the search.
+    assert_equal %w[2.0.54 2.0.0], probes
+    assert_equal "2.0.0", findings.first.introduced_in
+    payload = AgentsMiner::Reporting.payload_for(findings.first, from_version: pair.from_version)
+    assert_equal "2.0.0", payload.fetch("introduced_in")
+  end
+
+  def test_a_window_with_nothing_between_its_ends_is_not_searched_and_names_no_release
+    # 1.4.0 and 1.4.54 are neighbours in the index, so there is no middle release to install and
+    # nothing to claim. Nil is the answer, and the report still says what the pair proves.
+    check = self
+    probes = []
+    replace(AgentsMiner::Mine, :findings_between, lambda do |_library, _from, to, *_envs, **_kwargs|
+      probes << to
+      [check.test_finding]
+    end)
+
+    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.0", to_version: "1.4.54")
+    findings, = make(FakeSession.new(one_page)).examine(pair)
+
+    # One call, which is the differential itself: the search added no install.
+    assert_equal ["1.4.54"], probes
+    assert_nil findings.first.introduced_in
+    payload = AgentsMiner::Reporting.payload_for(findings.first, from_version: pair.from_version)
+    refute payload.key?("introduced_in"), "an unsearched window sends no field rather than a null"
+  end
+
+  def test_a_probe_budget_of_zero_leaves_the_window_rather_than_guessing
+    # The dial an operator turns when installs cost more than the answer is worth. Nothing is
+    # tried, and the finding keeps the window the differential established.
+    check = self
+    probes = []
+    replace(AgentsMiner::Mine, :findings_between, lambda do |_library, _from, to, *_envs, **_kwargs|
+      probes << to
+      [check.test_finding]
+    end)
+
+    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.54", to_version: "2.0.54")
+    findings, = make(FakeSession.new(one_page), bisect_probes: 0).examine(pair)
+
+    assert_equal ["2.0.54"], probes
+    assert_nil findings.first.introduced_in
+  end
+
+  def test_a_middle_release_that_cannot_be_built_stops_the_search_rather_than_moving_it
+    # The install fails, so the release was never asked. Reading that as "it still worked there"
+    # would walk the boundary up to a release nobody ran, which is the fabricated finding this
+    # module exists to avoid.
+    check = self
+    replace(AgentsMiner::Mine, :findings_between, lambda do |_library, _from, to, *_envs, **_kwargs|
+      raise AgentsMiner::Errors::MinerError, "no wheel for that interpreter" if to == "2.0.0"
+
+      [check.test_finding]
+    end)
+
+    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.54", to_version: "2.0.54")
+    findings, = make(FakeSession.new(one_page)).examine(pair)
+
+    assert_nil findings.first.introduced_in
   end
 
   # --- filing ---------------------------------------------------------------------------
