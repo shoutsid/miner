@@ -891,6 +891,35 @@ class VerifierTest < MinerTest
     assert_equal 1, session.calls.count { |call| call[0] == :scenario_run }
   end
 
+  # A claim written against another client's vocabulary costs a request, not an install, so it does
+  # not spend the execution budget: a backlog of them clears in a page rather than one per cycle.
+  def test_unreadable_claims_do_not_spend_the_execution_budget
+    session = fake_session([REPORTED])
+    junk = (1..5).map { |n| SCENARIO.merge("id" => "00000000-0000-0000-0000-00000000d00#{n}") }
+    session.scenario_pages["python"] = junk + [SCENARIO]
+    executions = []
+    stub(AgentsMiner::ScenarioRun, :plan, lambda { |scenario|
+      if scenario["id"].end_with?("d001", "d002", "d003", "d004", "d005")
+        raise AgentsMiner::ScenarioRun::Unreadable, "the scenario asks for setup step \"install\""
+      end
+
+      # The reader itself, not `ScenarioRun.plan`: this block *is* that method while the stub is
+      # installed, so calling it again is a recursion rather than a check.
+      AgentsMiner::ScenarioRun::Plan.read(scenario)
+    })
+    stub(AgentsMiner::ScenarioRun, :execute, lambda { |scenario, build:, build_gem: nil|
+      executions << scenario["id"]
+      { "result" => "unreached", "detail" => "dry" }
+    })
+
+    stats = verifier_for(session).one_cycle
+
+    # Six answers from a page of six with an execution budget of three: had the junk spent the
+    # budget, the claim this client can run would never have been reached.
+    assert_includes executions, SCENARIO["id"]
+    assert_equal 6, stats.scenarios, "five unreadable answers and one execution"
+  end
+
   # **A claim this client cannot read is answered rather than skipped.** The service stores the
   # `unreached` run and counts it for nothing, and the queue stops offering that claim to this
   # operator — which is what keeps a step nobody has defined from being re-read every cycle for ever.

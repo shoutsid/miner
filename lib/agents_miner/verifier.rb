@@ -620,10 +620,16 @@ module AgentsMiner
 
     # How many claims one cycle executes, per index.
     #
-    # Small on purpose: a proposal is one install of two releases, the same cost as a check, and the
-    # queue is a convenience rather than the job. A verification a report is waiting for and a
-    # proposal that would give it one are both installs, and the checks come first.
+    # Small on purpose: a proposal the corpus can execute is one install of two releases, the same
+    # cost as a check, and the queue is a convenience rather than the job. A verification a report is
+    # waiting for and a proposal that would give it one are both installs, and the checks come first.
     SCENARIO_LIMIT = 3
+
+    # How many proposals one cycle *reads*. Larger than the execution budget because a claim this
+    # client cannot read costs a request rather than an install: the deployment's backlog holds
+    # hundreds of proposals written against another client's vocabulary, and answering one per cycle
+    # would take hours before a claim this client can actually run came up.
+    SCENARIO_PAGE = 20
 
     # **The claims somebody proposed and nobody has executed, read as a queue.**
     #
@@ -643,10 +649,17 @@ module AgentsMiner
         break unless @writes.allow
         next if paused?(ecosystem.name)
 
-        queue = @session.scenario_queue(ecosystem: ecosystem.name, limit: SCENARIO_LIMIT)
+        queue = @session.scenario_queue(ecosystem: ecosystem.name, limit: SCENARIO_PAGE)
+        executed = 0
         Array(queue["items"]).each do |scenario|
           break unless @writes.allow
+          # Read before executing, so the install budget is spent on claims this client can run: an
+          # unreadable one is answered and counted nothing, which is cheap and still honest.
+          if readable_scenario?(scenario)
+            break if executed >= SCENARIO_LIMIT
 
+            executed += 1
+          end
           execute_scenario(scenario, stats)
         end
       end
@@ -657,6 +670,13 @@ module AgentsMiner
       stats.notes << "the scenario queue is paused: #{e.message}"
     rescue Errors::CorpusError => e
       stats.notes << "could not read the scenario queue: #{e.message}"
+    end
+
+    def readable_scenario?(scenario)
+      ScenarioRun.plan(scenario)
+      true
+    rescue ScenarioRun::Unreadable
+      false
     end
 
     def execute_scenario(scenario, stats)
@@ -827,6 +847,6 @@ module AgentsMiner
 
     private :build, :build_gem, :record, :examine, :check_all, :to_check, :refresh, :touch, :wait,
       :note_failed_build, :sibling_failure, :unbuildable_for, :machine_for, :run_scenarios,
-      :execute_scenario
+      :execute_scenario, :readable_scenario?
   end
 end

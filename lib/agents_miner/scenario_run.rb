@@ -135,6 +135,14 @@ module AgentsMiner
       end
     end
 
+    # The steps, or `Unreadable` naming the one that stopped it.
+    #
+    # Public so a caller can ask "can this machine run that claim?" before spending an install on it:
+    # a claim written against another client's vocabulary is a request rather than a build, and a
+    # loop that discovered that only inside `execute` would pay for the distinction the wrong way
+    # round.
+    def self.plan(scenario) = Plan.read(scenario)
+
     # `body` is what `POST /api/scenarios/{id}/runs` takes. It is the caller's decision whether to
     # send a run whose `result` is `unreached` — the service stores it and counts it for nothing, and
     # a caller that reports one has said something true about this machine.
