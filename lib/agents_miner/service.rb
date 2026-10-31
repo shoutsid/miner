@@ -1303,6 +1303,7 @@ module AgentsMiner
 
       linked = Service.linked(report, findings, pair)
       if linked.nil?
+        ask_for_hypothesis(report, pair, findings, claimed: claimed)
         give_up(report_id, Ledger::NO_MECHANISM,
           "#{findings.length} finding(s), none naming this report's argument",
           claimed: claimed)
@@ -1347,6 +1348,25 @@ module AgentsMiner
       @ledger.record_report(report_id, outcome: Ledger::PROPOSED, note: answer.kind)
       stats.answered += 1
       @log.info("%s (%s: %s)", answer.summary, answer.kind, finding.parameter)
+    end
+
+    # **The ledger's dead end and the corpus's next question are two different records.** The miner
+    # settles its own claim (`give_up`) either way, and the ask is best-effort: a service without the
+    # route, an account without the capability, or a rate limit is a fact about the corpus rather
+    # than a reason to fail a report the miner examined honestly. Nothing is written when the corpus
+    # is paused — the refusal is logged and the cycle moves on.
+    def ask_for_hypothesis(report, pair, findings, claimed:)
+      return unless claimed
+
+      @session.request_hypothesis(report["id"].to_s,
+        note: "#{findings.length} finding(s) between #{pair.from_version} and #{pair.to_version}, " \
+              "none naming this report's argument",
+        evidence: { "from_version" => pair.from_version, "to_version" => pair.to_version,
+                    "findings" => findings.length })
+    rescue Errors::RateLimited, Errors::CollectionPaused => e
+      @log.info("no hypothesis for %s: %s", report["id"], e)
+    rescue Errors::CorpusError => e
+      @log.info("no hypothesis for %s: %s", report["id"], e)
     end
 
     def give_up(report_id, outcome, note, retry_instead: false, claimed: true)

@@ -135,6 +135,15 @@ class ServiceTest < MinerTest
       nil
     end
 
+    def request_hypothesis(report_id, note:, evidence: nil)
+      # Recorded with its note, so a test can ask whether the ask carried the versions the
+      # differential covered rather than only that something was filed.
+      @calls << ["hypothesis", report_id, note, evidence]
+      raise Errors::CorpusError, "refused" if @raise_on.include?("hypothesis")
+
+      { "task_id" => "task-1", "kind" => "hypothesis" }
+    end
+
     def propose_resolution(report_id, payload)
       @calls << ["resolution", report_id, payload]
       raise Errors::CorpusError, "refused" if @raise_on.include?("resolution")
@@ -964,6 +973,35 @@ class ServiceTest < MinerTest
     miner.one_cycle
 
     assert_equal 1, session.calls.count { |call| call.first == "claim" }
+    assert_equal "no_mechanism", load.report(REPORT["id"]).outcome
+  end
+
+  # **A dead end asks the corpus for an experiment once, with the versions it examined.** The ask is
+  # the only thing a miner can do with a break it cannot explain, and the ledger's retry interval —
+  # not a second ask per cycle — decides when it is worth another look.
+  def test_an_unexplained_report_asks_for_one_hypothesis_and_keeps_its_versions
+    session = FakeSession.new(one_page([REPORT]))
+    miner = make(session, findings: [])
+    miner.one_cycle
+    session.pages = one_page([REPORT])
+    miner.one_cycle
+
+    asks = session.calls.select { |call| call.first == "hypothesis" }
+    assert_equal 1, asks.length
+    assert_equal REPORT["id"], asks.first[1]
+    assert_equal({ "from_version" => "1.4.54", "to_version" => "2.0.54", "findings" => 0 },
+      asks.first[3])
+    assert_includes asks.first[2], "none naming this report's argument"
+  end
+
+  # A corpus that refuses the ask has not failed the report: the ledger still records what the miner
+  # saw, and a service without the route must not turn a cycle into an exception.
+  def test_a_refused_hypothesis_still_settles_the_ledger
+    session = FakeSession.new(one_page([REPORT]), raise_on: ["hypothesis"])
+    miner = make(session, findings: [])
+    stats = miner.one_cycle
+
+    assert_equal 1, stats.skipped
     assert_equal "no_mechanism", load.report(REPORT["id"]).outcome
   end
 

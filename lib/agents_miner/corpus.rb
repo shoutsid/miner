@@ -302,6 +302,16 @@ module AgentsMiner
 
     def release(report_id) = request("POST", "/api/reports/#{report_id}/release")
 
+    # **A dead end is a request for an experiment, not a shrug.** When the differential names nothing
+    # that explains the break, the useful next move is a call whose behaviour differs between the two
+    # releases — a scenario a worker can run — so the miner asks the corpus for one instead of
+    # remembering only its own failure. The reply is a task, never evidence: no status, trust or
+    # counter moves from this call.
+    def request_hypothesis(report_id, note:, evidence: nil)
+      request("POST", "/api/reports/#{report_id}/hypothesis",
+        body: { "note" => note.to_s[0, 2_000], "evidence" => evidence }.compact)
+    end
+
     def propose_resolution(report_id, payload)
       request("POST", "/api/reports/#{report_id}/resolution", body: payload)
     end
