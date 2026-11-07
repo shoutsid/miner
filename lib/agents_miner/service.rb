@@ -7,6 +7,7 @@ require "thread"
 
 require_relative "advisories"
 require_relative "bandwidth"
+require_relative "boot"
 require_relative "corpus"
 require_relative "ecosystems"
 require_relative "envs"
@@ -16,6 +17,7 @@ require_relative "ledger"
 require_relative "log"
 require_relative "pair"
 require_relative "planner"
+require_relative "resolver"
 require_relative "rubyversions"
 require_relative "rubyindex"
 require_relative "solving"
@@ -114,6 +116,33 @@ module AgentsMiner
     # pushing facts only where the planner read a history, and the reason it is bounded at all is
     # that a pass over every cached gem must not put the mining it runs beside behind it.
     REQUIREMENTS_SETTLE_PER_CYCLE = 100
+
+    # How many examined cells one cycle pushes to the corpus. The service takes at most 500 per
+    # request (`Examination::Body::MAX_ITEMS`), so this is a page size and not a preference: a cycle
+    # that examined more than this sends the rest next cycle, and the write is idempotent by the
+    # cell, so a re-send is a no-op. A backfill of a whole ledger pages at this size too.
+    EXAMINATION_PAGE = 500
+
+    # How many *pairs* one cycle's examination push covers. One pair is three cells
+    # (`differential`/`install`/`load`), and the page is bounded by cells, so this is the cell page
+    # divided by three. The push carries a cursor, so the next cycle reaches the pairs behind this
+    # one rather than re-sending the same first page.
+    EXAMINATION_PAIRS = EXAMINATION_PAGE / 3
+
+    # How many resolution cells one cycle attempts. A `bundle lock` fetches the whole framework's
+    # metadata, so it is the most expensive thing the examining loop does; a cycle that resolved
+    # every pair would spend its whole wall clock on the resolver. The rest wait for the next cycle,
+    # and the answer is a fact about the release rather than about the cycle.
+    RESOLVE_PROBES = 4
+
+    # How many boot cells one cycle attempts. A boot installs the release and the framework and
+    # starts an interpreter, so it is the most expensive cell; the rest wait for the next cycle.
+    BOOT_PROBES = 2
+
+    # How many release notes one cycle reads and posts. A changelog read is a directory listing and
+    # a bounded file read, but a cycle that posted every note it had ever seen would spend its
+    # writes on documents rather than on findings; the write is idempotent, so the rest wait.
+    NOTE_PAGE = 20
 
     # How long between reads of the reviewed advisory set. Six hours: the source changes as
     # advisories are published and withdrawn, and a lead is the smallest thing this miner works on,
@@ -268,7 +297,8 @@ module AgentsMiner
     def initialize(session:, home:, state:, watchlist:, ledger:, budget: Planner::DEFAULT_BUDGET,
                    report_budget: 1, dry_run: false, heartbeat: nil,
                    writes_per_hour: WRITES_PER_HOUR, workers: DEFAULT_WORKERS,
-                   bisect_probes: BISECT_PROBES, ecosystems: nil, watchlists: nil)
+                   bisect_probes: BISECT_PROBES, ecosystems: nil, watchlists: nil,
+                   resolve_probes: RESOLVE_PROBES, boot_probes: BOOT_PROBES)
       @session = session
       @home = Pathname.new(home)
       @state = Pathname.new(state)
@@ -287,6 +317,12 @@ module AgentsMiner
       # its turn on this gem". A gem whose document is not readable settles neither, and without
       # this the walk would re-examine it first every cycle and starve the gems behind it.
       @requirements_attempted = Set.new
+      # **Where the paged pushes have got to, per index.** The ledger is a Hash in insertion order,
+      # so a push bounded to a page would return the same first page every cycle; these cursors are
+      # the last key each push sent, and they are what makes the next cycle reach the rest. In memory
+      # rather than in the ledger: a restart re-sends from the beginning, which is idempotent.
+      @examination_cursors = {}
+      @note_cursors = {}
       (watchlists || {}).each { |name, names| @watchlists[name] = names.to_a }
       @ledgers = { @ecosystems.first.name => ledger }
       @budget = budget
@@ -305,6 +341,13 @@ module AgentsMiner
       # the search off without turning off the field: a finding keeps `introduced_in` nil, which is
       # the same statement an unsearched window makes.
       @bisect_probes = [bisect_probes.to_i, 0].max
+      # Resolutions one cycle may attempt. See `RESOLVE_PROBES`: a `bundle lock` is the most
+      # expensive thing the examining loop does, and the answer is a fact about the release rather
+      # than about the cycle, so the rest wait.
+      @resolve_probes = [resolve_probes.to_i, 0].max
+      @resolve_spent = 0
+      @boot_probes = [boot_probes.to_i, 0].max
+      @boot_spent = 0
       @stop = false
       # What this miner pulled per second over the last cycle, and the raw reading the next one
       # subtracts from. Kept here rather than measured on demand so the window is a cycle — minutes
@@ -507,9 +550,19 @@ module AgentsMiner
       # After the save and not before: the ledger is a cycle's work and the picture is a courtesy,
       # so a service that refuses the report cannot cost the cycle it describes.
       @ledgers.each { |name, one| report_unexaminable(name, one, stats) }
+      # **The negative space, pushed as evidence.** A pair this cycle examined is a cell the corpus
+      # can answer with — including the clean ones, which were the miner's private knowledge until
+      # now. Best-effort like the unexaminable picture: the ledger is re-sent next cycle, so a
+      # refusal loses nothing.
+      @ledgers.each { |name, one| report_examinations(name, one, stats) }
+      # **A release's own words, read from the gem just installed.** The changelog is the one place
+      # a release explains why it changed something, and the examination already unpacked it — so
+      # this costs a directory listing and a bounded read, and the document is what a model later
+      # turns into documented changes. Best-effort like the rest: a refusal loses a document, not a
+      # finding.
+      @ledgers.each { |name, one| report_release_notes(name, stats) }
       stats
     end
-
     # --- reading the corpus ----------------------------------------------------------------
 
     # Walk the change feed forward, and remember as far as it got.
@@ -741,6 +794,90 @@ module AgentsMiner
       @log.info("not reporting what %s cannot examine: %s", name, e.message)
     rescue Errors::CorpusError => e
       @log.warning("could not report what %s cannot examine: %s", name, e.message)
+    end
+
+    # **Hand the service the cells this cycle examined, clean ones included.**
+    #
+    # The differential's negative space is the answer an upgrade question needs: "this move was
+    # executed and came back clean" is a different fact from "nobody has looked", and before this
+    # push the corpus could only say the second. Best-effort in both directions, exactly like
+    # `report_unexaminable`: the ledger is durable, so a refusal costs the cycle a courtesy and not
+    # the facts.
+    #
+    # **A page, and a cursor, because the ledger is a Hash in insertion order.** `limit` alone would
+    # return the same first page every cycle and never reach the tail; the cursor is the last key
+    # sent, so the next cycle starts after it. When a page is exhausted the cursor resets, so the
+    # whole ledger is re-sent from the beginning — idempotent by the cell, and the honest way to
+    # catch a pair that changed after its first push.
+    def report_examinations(name, ledger, stats, limit: EXAMINATION_PAIRS)
+      after = @examination_cursors[name]
+      rows, cursor = ledger.examination_page(ecosystem: name, after: after, limit: limit)
+      if rows.empty?
+        @examination_cursors[name] = nil
+        return
+      end
+
+      @session.record_examinations(rows)
+      @examination_cursors[name] = cursor
+      stats.notes << "[#{name}] reported #{rows.length} examined cell(s)"
+    rescue Errors::CollectionPaused => e
+      @log.info("not reporting what %s examined: %s", name, e.message)
+    rescue Errors::CorpusError => e
+      @log.warning("could not report what %s examined: %s", name, e.message)
+    end
+
+    # **Read each examined release's own changelog and hand it to the corpus.**
+    #
+    # The examination built the environment, so the document is on disk already; this finds it by
+    # the conventional filenames and posts it. A gem with no changelog is skipped, which is a
+    # statement rather than an error. Bounded to a page per cycle with a cursor, so the next cycle
+    # reaches the gems behind this page rather than re-reading the same first twenty; the write is
+    # idempotent, so the reset when the ledger is exhausted is a no-op.
+    def report_release_notes(name, stats, limit: NOTE_PAGE)
+      ecosystem = index(name)
+      after = @note_cursors[name]
+      posted = 0
+      last = nil
+      reached_cursor = after.nil?
+      @ledgers[name].pairs.each do |key, record|
+        # **The cursor is a position, not an ordering.** The ledger's insertion order is not
+        # alphabetical, so `key <= after` would skip the wrong pairs; instead the walk skips every
+        # pair up to and including the one the caller last sent, then resumes.
+        unless reached_cursor
+          reached_cursor = key == after
+          next
+        end
+        break if posted >= limit
+        next unless Ledger::SETTLED_PAIR.include?(record.outcome)
+
+        last = key
+        package, from_version, to_version = key.split(" ")
+        from_version, to_version = from_version.to_s.split("->", 2)
+        env = begin
+          ecosystem.build(package, to_version, home: @home,
+            deadline: ecosystem.install_timeout, attempt: 0)
+        rescue StandardError
+          next
+        end
+        found = RubyEnvs.changelog(env)
+        next if found.nil?
+
+        @session.record_release_notes([{
+          "ecosystem" => name, "library" => package, "version" => to_version,
+          "source" => "gem:#{found['name']}", "body" => found["body"],
+          "fetched_by" => ecosystem.machine
+        }])
+        posted += 1
+      end
+      # A page that reached the end resets the cursor, so the whole ledger is re-read from the
+      # beginning — idempotent by the document, and the honest way to catch a note that appeared
+      # after its first read.
+      @note_cursors[name] = last.nil? ? nil : last
+      stats.notes << "[#{name}] reported #{posted} release note(s)" if posted.positive?
+    rescue Errors::CollectionPaused => e
+      @log.info("not reporting %s release notes: %s", name, e.message)
+    rescue Errors::CorpusError => e
+      @log.warning("could not report %s release notes: %s", name, e.message)
     end
 
     # One package's releases, from the cache unless the index may be asked.
@@ -979,6 +1116,13 @@ module AgentsMiner
       end
       return if admitted.empty?
 
+      # **The resolution budget is per cycle, not per pair.** A `bundle lock` fetches the whole
+      # framework's metadata, so it is the most expensive thing this loop does; a cycle that
+      # resolved every pair it examined would spend its whole wall clock on the resolver. The
+      # counter is reset at the top of the cycle, so a cycle resolves its first few pairs and the
+      # rest wait for the next one.
+      @resolve_spent = 0
+      @boot_spent = 0
       workers = [[@workers, admitted.length].min, 1].max
       @log.info("examining %d upgrade(s) on %d worker(s)", admitted.length, workers)
       work = Queue.new
@@ -993,13 +1137,13 @@ module AgentsMiner
               break
             end
             begin
-              findings, error = examine(pair)
-              results << [pair, findings, error, nil]
+              findings, error, resolve, boot = examine(pair)
+              results << [pair, findings, error, nil, resolve, boot]
             rescue StandardError => e
               # A defect in the examining is a defect; it should cost the pair it was examining
               # rather than every pair in the batch and the cycle that ran them. Catching it here
               # rather than in `examine` keeps `examine` honest about the failures it knows about.
-              results << [pair, nil, nil, e]
+              results << [pair, nil, nil, e, nil, nil]
             end
           end
         end
@@ -1007,7 +1151,7 @@ module AgentsMiner
       # Consumed in completion order, so a slow package does not hold up the recording of the ones
       # behind it. Every result is recorded here, on the cycle's thread.
       admitted.length.times do
-        pair, findings, error, raised = results.pop
+        pair, findings, error, raised, resolve, boot = results.pop
         if raised
           @log.error("examining %s %s->%s failed: %s: %s",
             pair.package, pair.from_version, pair.to_version, raised.class, raised.message)
@@ -1021,7 +1165,7 @@ module AgentsMiner
           stats.skipped += 1
           next
         end
-        record(pair, findings, error, stats)
+        record(pair, findings, error, stats, resolve, boot)
       end
       threads.each(&:join)
     end
@@ -1035,6 +1179,11 @@ module AgentsMiner
     # The error travels as the exception rather than as its message, because it carries two facts the
     # ledger needs and one of them it cannot re-derive: a release that cannot be built here is
     # permanent, and it is one fact about every pair that runs through it rather than one per pair.
+    #
+    # **The resolution cell is attempted beside the differential, not instead of it.** It answers a
+    # different question — can this release resolve at all — and it is the cheapest high-value
+    # examination the corpus can run. It is bounded per cycle (`@resolve_spent`) and it never raises:
+    # a resolver that could not run is `unexaminable`, which is a fact about the machine.
     def examine(pair)
       one = index(pair.ecosystem)
       # **The cold path is the measurement.** Gate B asks what a verification costs, and a
@@ -1042,18 +1191,58 @@ module AgentsMiner
       # these two builds are the installs, and the differential is the probe. The clock runs around
       # all three so the number sent with a run includes what the finding cost to establish.
       started = monotonic
+      resolve = resolve_for(pair)
+      boot = boot_for(pair)
       begin
         before = build(pair, pair.from_version)
         after = build(pair, pair.to_version)
         findings = one.findings(pair.package, pair.from_version, pair.to_version, before, after,
           suffix: "-#{pair.from_version}-#{pair.to_version}".tr("/", "_"))
       rescue Errors::MinerError => e
-        return [[], e]
+        return [[], e, resolve, boot]
       end
       elapsed = ((monotonic - started) * 1000).round
       findings.each { |finding| finding.duration_ms = elapsed }
       establish_introductions(pair, before, findings)
-      [findings, nil]
+      [findings, nil, resolve, boot]
+    end
+
+    # **One boot cell, or nothing.** Ruby only, bounded per cycle, and skipped when the pair already
+    # carries one: the answer is a fact about the release, and a re-run reaches the same one.
+    def boot_for(pair)
+      return nil unless pair.ecosystem == "ruby"
+      return nil if @dry_run
+      return nil if @boot_spent >= @boot_probes
+
+      record = ledger_for(pair.ecosystem).pair(pair.package, pair.from_version, pair.to_version)
+      return nil if record && !record.boot.to_s.empty?
+
+      @boot_spent += 1
+      Boot.cell(pair.package, pair.to_version, home: @home)
+    rescue StandardError => e
+      @log.warning("could not boot %s %s: %s: %s", pair.package, pair.to_version,
+        e.class, e.message)
+      nil
+    end
+
+    # **One resolution cell, or nothing.** Ruby only — `bundle lock` is Bundler's — and bounded per
+    # cycle, because the resolver fetches the whole framework's metadata. A pair whose resolution was
+    # already recorded is not asked again: the answer is a fact about the release, and a re-run
+    # reaches the same one.
+    def resolve_for(pair)
+      return nil unless pair.ecosystem == "ruby"
+      return nil if @dry_run
+      return nil if @resolve_spent >= @resolve_probes
+
+      record = ledger_for(pair.ecosystem).pair(pair.package, pair.from_version, pair.to_version)
+      return nil if record && !record.resolve.to_s.empty?
+
+      @resolve_spent += 1
+      Resolver.resolve_cell(pair.package, pair.to_version)
+    rescue StandardError => e
+      @log.warning("could not resolve %s %s: %s: %s", pair.package, pair.to_version,
+        e.class, e.message)
+      nil
     end
 
     # **The release that actually broke it, from the releases between the endpoints.**
@@ -1131,7 +1320,7 @@ module AgentsMiner
     # whether asking again could change the answer and which release it was about, and otherwise the
     # exception a caller's own defect raised — for which the safe reading is "try again", because
     # nothing has been established about the release.
-    def record(pair, findings, error, stats)
+    def record(pair, findings, error, stats, resolve = nil, boot = nil)
       one = ledger_for(pair.ecosystem)
       if error
         stats.skipped += 1
@@ -1151,7 +1340,9 @@ module AgentsMiner
           one.record_pair(pair.package, pair.from_version, pair.to_version,
             outcome: Ledger::UNEXAMINABLE,
             note: error.message.to_s[0, 200],
-            release: release)
+            release: release, resolve: resolve && resolve[:outcome],
+            resolve_note: resolve && resolve[:note],
+            boot: boot && boot[:outcome], boot_note: boot && boot[:note])
           @log.warning("unexaminable %s %s->%s: %s", pair.package, pair.from_version,
             pair.to_version, error.message.to_s[0, 200])
           return
@@ -1160,7 +1351,9 @@ module AgentsMiner
           outcome: Ledger::FAILED,
           next_at: Time.now.to_f + RETRY_SECONDS,
           note: error.message.to_s[0, 200],
-          release: release)
+          release: release, resolve: resolve && resolve[:outcome],
+          resolve_note: resolve && resolve[:note],
+          boot: boot && boot[:outcome], boot_note: boot && boot[:note])
         @log.warning("skip %s %s->%s: %s", pair.package, pair.from_version, pair.to_version,
           error.message.to_s[0, 200])
         return
@@ -1195,7 +1388,10 @@ module AgentsMiner
         findings: findings.length,
         filed: filed,
         next_at: held_back ? Time.now.to_f + RETRY_SECONDS : nil,
-        note: held_back ? "#{held_back} finding(s) not filed" : ""
+        note: held_back ? "#{held_back} finding(s) not filed" : "",
+        resolve: resolve && resolve[:outcome],
+        resolve_note: resolve && resolve[:note],
+        boot: boot && boot[:outcome], boot_note: boot && boot[:note]
       )
       stats.pairs_mined += 1
       stats.findings += findings.length

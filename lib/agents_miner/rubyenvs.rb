@@ -788,6 +788,46 @@ module AgentsMiner
     # index is being mined.
     def self.machine = "#{runtime} #{Machine.toolchain}"
 
+    # **A release's own words, read from the installed gem.**
+    #
+    # A changelog is the one place a release explains *why* it changed something, and the miner
+    # already has the gem unpacked — so reading it costs a directory listing and a bounded read, and
+    # no network at all. The service stores the document; this only finds it and returns it, because
+    # the meaning of the reading belongs to the service.
+    #
+    # Bounded in both directions: a name from a fixed list (the conventional changelog filenames),
+    # and a body capped at `ReleaseNote::MAX_BODY`. A gem with no changelog returns nil, which is a
+    # statement — nobody has read one — rather than an empty note.
+    CHANGELOG_NAMES = %w[
+      CHANGELOG.md CHANGELOG CHANGELOG.txt CHANGELOG.rst CHANGELOG.markdown
+      CHANGES.md CHANGES CHANGES.txt HISTORY.md HISTORY HISTORY.txt
+      NEWS.md NEWS NEWS.txt RELEASES.md RELEASES.txt
+    ].freeze
+    CHANGELOG_MAX_BYTES = 128 * 1024
+
+    def self.changelog(env)
+      root = env.root
+      return nil unless root.directory?
+
+      gem_dir = Dir.glob(root.join("gems", "*").to_s).find do |path|
+        File.directory?(path) && File.basename(path).start_with?("#{env.package}-")
+      end
+      return nil if gem_dir.nil?
+
+      CHANGELOG_NAMES.each do |name|
+        path = File.join(gem_dir, name)
+        next unless File.file?(path) && File.readable?(path)
+
+        body = File.read(path, CHANGELOG_MAX_BYTES, encoding: "UTF-8")
+        return { "name" => name, "body" => body } unless body.strip.empty?
+      end
+      nil
+    rescue SystemCallError, ArgumentError
+      # A file that cannot be read is not a document: nil is the honest answer, and the caller
+      # records nothing rather than an empty note.
+      nil
+    end
+
     # The registry of per-environment locks, and the guard for the instant it takes to hand one
     # out. Public because `prune` and the suite both check that a reclaimed environment's lock is
     # gone: a registry that only grows is the leak the forgetting exists to bound.

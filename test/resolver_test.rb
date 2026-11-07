@@ -280,4 +280,41 @@ class ResolverTest < MinerTest
     assert_includes payload["environment"], "searched"
     refute_includes payload["environment"], "bundle lock"
   end
+
+  # --- the resolution cell ------------------------------------------------------------------
+
+  # **The cell answers a different question than the verifier's `resolve`.** It asks whether one
+  # release resolves at all, and its outcome is the service's four-valued vocabulary rather than a
+  # verification verdict: a resolver conflict is a `finding`, a clean lock is `clean`, and a
+  # resolver that could not run is `unexaminable` — never `clean`.
+  def test_a_resolution_cell_reports_clean_when_the_lock_succeeds
+    cell = lock(status: 0, stdout: "Writing lockfile") { R.resolve_cell("actionpack", "7.1.6") }
+
+    assert_equal "clean", cell.fetch(:outcome)
+    assert_includes cell.fetch(:note), "exit 0"
+  end
+
+  def test_a_resolution_cell_reports_a_finding_when_bundler_refuses
+    cell = lock(status: 6, stdout: CONFLICT_OUTPUT) { R.resolve_cell("js_image_paths", "0.2.0") }
+
+    assert_equal "findings", cell.fetch(:outcome)
+    assert_includes cell.fetch(:note), "Could not find compatible versions"
+  end
+
+  # A resolver that failed for a reason that is not a conflict established nothing about the
+  # release, so the cell is `unexaminable` rather than `clean`.
+  def test_a_resolution_cell_reports_unexaminable_when_the_resolver_could_not_run
+    cell = lock(status: 1, stdout: "Could not reach rubygems.org") do
+      R.resolve_cell("actionpack", "7.1.6")
+    end
+
+    assert_equal "unexaminable", cell.fetch(:outcome)
+  end
+
+  # The framework pin is added for a component gem and only for one: `actionpack 7.1.6` resolves on
+  # its own even when it cannot sit beside `rails 7.1.6`.
+  def test_the_cell_gemfile_pins_the_framework_for_a_component_and_not_for_a_plain_gem
+    assert_includes R.cell_gemfile("actionpack", "7.1.6"), "gem \"rails\", \"7.1.6\""
+    refute_includes R.cell_gemfile("nokogiri", "1.16.0"), "gem \"rails\""
+  end
 end

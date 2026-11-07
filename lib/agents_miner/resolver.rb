@@ -61,6 +61,13 @@ module AgentsMiner
     # The text that separates a resolution failure from every other way `bundle lock` can fail.
     CONFLICT = /Could not find compatible versions|cannot be used|depends on rails/
 
+    # The gems that make up the framework. A component's own resolution does not exercise the
+    # framework pin, so the pin is added for these and only these. Module level rather than inside
+    # `class << self`, because `Boot` reads it too and a constant on the singleton class is not
+    # reachable as `Resolver::RAILS_FAMILY`.
+    RAILS_FAMILY = %w[rails railties actionpack actionview activemodel activerecord
+      activesupport actionmailer activejob actioncable activestorage].freeze
+
     class << self
       # The two releases a report's resolver output names, or nil when it is not that kind of report.
       #
@@ -237,6 +244,70 @@ module AgentsMiner
         )
       end
 
+      # **The resolution cell: can this release resolve at all, on this machine?**
+      #
+      # A different question from `resolve`, which asks whether two *named* releases can sit
+      # together. This asks whether a minimal Gemfile naming one release resolves, and it is the
+      # cheapest high-value examination the corpus can run: it needs no application, and the exit
+      # code *is* the evidence. Bundler's own refusal is the finding; a resolver that could not run
+      # at all is `unexaminable`, because the examination established nothing about the release.
+      #
+      # The framework pin is added for a Rails component gem: `actionpack 7.1.6` resolves on its
+      # own even when it cannot sit beside `rails 7.1.6`, and the framework pin is what makes the
+      # cell answer the question an upgrade asks. A gem outside the family is resolved alone.
+      #
+      # Returns `{outcome:, note:}` — the service's four-valued vocabulary, not a verification
+      # verdict: this is an examination, not a vote about a report.
+      def resolve_cell(gem, version, suffix: "")
+        Dir.mktmpdir("resolve-") do |dir|
+          gemfile = File.join(dir, "Gemfile")
+          File.write(gemfile, cell_gemfile(gem, version))
+          env = ENV.to_h.merge(
+            "BUNDLE_GEMFILE" => gemfile,
+            "BUNDLE_APP_CONFIG" => File.join(dir, ".bundle")
+          )
+          result = Envs.run_captured(["bundle", "lock"], timeout: LOCK_TIMEOUT, cwd: dir, env: env)
+          output = [result.stdout, result.stderr].map(&:to_s).reject(&:empty?).join("\n").strip
+          status = result.status
+          if status.zero?
+            return { outcome: "clean",
+                     note: "`bundle lock` resolved #{gem} #{version}: exit 0." }
+          end
+          if output.include?(gem) && output.match?(CONFLICT)
+            return { outcome: "findings",
+                     note: "`bundle lock` refused #{gem} #{version}: exit #{status}. #{clip(output)}" }
+          end
+
+          # A resolver that failed for a reason that is not a conflict — no index, no `bundle`, a
+          # gem the index does not serve — established nothing about the release. `unexaminable`
+          # is the honest word, and it is not `clean`.
+          { outcome: "unexaminable",
+            note: "`bundle lock` exited #{status} without a resolver conflict: #{clip(output, 400)}" }
+        end
+      rescue Envs::TimedOut => e
+        detail = if e.started?
+          "`bundle lock` did not finish within #{LOCK_TIMEOUT}s"
+        else
+          "could not start `bundle lock`: this machine has no `bundle` on its PATH"
+        end
+        { outcome: "unexaminable", note: detail }
+      rescue SystemCallError => e
+        { outcome: "unexaminable",
+          note: "could not run `bundle lock`: #{e.class}: #{e.message}" }
+      end
+
+      # The minimal Gemfile for one resolution cell: the release, and the framework pin when the
+      # release is a Rails component. A source is required by Bundler and nothing else is declared.
+      def cell_gemfile(gem, version)
+        lines = ["source \"https://rubygems.org\"", "", "gem \"#{gem}\", \"#{version}\""]
+        if RAILS_FAMILY.include?(gem.to_s) && gem.to_s != "rails"
+          lines << "gem \"rails\", \"#{version}\""
+        end
+        lines.join("\n") + "\n"
+      end
+
+      # The gems that make up the framework. A component's own resolution does not exercise the
+      # framework pin, so the pin is added for these and only these.
       # The minimal project: the framework at the release the report was moving to, and the one gem
       # the report says could not sit beside it. A source is required by Bundler, and nothing else
       # is declared — an application's other gems are not part of this claim.

@@ -22,11 +22,24 @@ reviewers can read the client, not because it is open source.
 - **`solve`** — read open reports and attach an executed fix where the client can establish
   one.
 - **`serve`** — the durable loop: read the service's mining queue, extend it with a breadth
-  ranking, keep a ledger, and examine several upgrades at once.
+  ranking, keep a ledger, and examine several upgrades at once. Each examined pair pushes a
+  `differential` cell plus `install` and `load` cells, and a bounded number of pairs also get a
+  `resolve` cell (a minimal Gemfile and `bundle lock`) and a `boot` cell (the release installed and
+  required inside a minimal Rack host). Every gem `check_kind` the service declares is produced
+  here.
+- **`examine-service`** — execute a non-gem transition and record it: read a JSON declaration of a
+  service, platform or agent move, run its `deploy`, `health` and `contract` commands, and push one
+  examination cell per check. The gem checks are the miner's; these three are the ones a non-gem
+  subject is examined by, and no program in this tree ran them before. `--dry-run` prints the cells
+  and writes nothing.
 - **`verify`** — confirm other operators' reports by execution, as one of two independent
   methods. A Rails report that failed while Bundler was choosing versions is checked without the
   application: `as-reported` executes a minimal `bundle lock` naming the two releases, and
   `searched` reads the refused gem's own gemspec for its Rails requirement.
+- **`backfill-examinations`** — push an existing ledger's examined pairs to the corpus, once.
+  The running service already pushes each cycle's cells; this is for the pairs it settled before
+  the corpus had anywhere to put them, so a move that was examined and came back clean reads as
+  `clean` rather than as "nobody has looked".
 
 ## Why execution
 

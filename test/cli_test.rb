@@ -109,6 +109,27 @@ class CliTest < MinerTest
     assert_equal "mine", parse(%w[mine --role nonsense]).command
   end
 
+  # The non-gem transition is a command of its own, and its declaration is a path rather than a
+  # string for the same reason `--home` is: the mode reads a file, and a `Pathname` is what it takes.
+  def test_examine_service_parses_its_declaration_as_a_path
+    args = parse(%w[examine-service --declaration /tmp/move.json])
+
+    assert_equal "examine-service", args.command
+    assert_kind_of Pathname, args.declaration
+    assert_equal "/tmp/move.json", args.declaration.to_s
+  end
+
+  # A command that cannot run without its declaration says so as a usage error rather than a
+  # traceback, which is what an operator reading `docker logs` needs.
+  def test_examine_service_without_a_declaration_is_a_usage_error
+    args = parse(["examine-service"])
+    C.resolve_defaults(args)
+
+    error = assert_raises(C::UsageError) { C.examine_service(args) }
+
+    assert_includes error.message, "--declaration"
+  end
+
   # The watchlist depth describes the *deployment*, so it is read from the environment.
   def test_the_top_default_comes_from_miner_top
     ENV.delete("MINER_TOP")

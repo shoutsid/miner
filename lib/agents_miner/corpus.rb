@@ -278,6 +278,29 @@ module AgentsMiner
 
     def submit(payload) = request("POST", "/api/reports", body: payload)
 
+    # **Hand the service the cells this machine examined.**
+    #
+    # A bounded batch, idempotent by the cell, so the miner can re-send its whole ledger without
+    # duplicating a fact. The service computes `environment_digest` from the structured environment
+    # — a sender-supplied identity is a claim the receiver cannot check — so this sends the
+    # environment and not a digest.
+    def record_examinations(records)
+      return { "recorded" => 0 } if records.empty?
+
+      request("POST", "/api/releases/examinations", body: { "examinations" => records })
+    end
+
+    # Hand the service a release's own words, as this machine read them.
+    #
+    # The document is the release's changelog, read from the installed gem; the service stores it
+    # with the source and the time it was read, and computes the body's digest itself. A note is a
+    # document rather than a claim: it moves no report, no status and no trust.
+    def record_release_notes(records)
+      return { "recorded" => 0 } if records.empty?
+
+      request("POST", "/api/releases/notes", body: { "notes" => records })
+    end
+
     # Who this key is, so a service can tell its own reports from others'.
     #
     # The miner verifies by executing, and execution by the author is not the independent

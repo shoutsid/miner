@@ -23,6 +23,7 @@ require_relative "reporting"
 require_relative "rubyversions"
 require_relative "service"
 require_relative "solving"
+require_relative "transition"
 require_relative "verifier"
 require_relative "verifying"
 require_relative "versions"
@@ -57,7 +58,7 @@ module AgentsMiner
     MINER_NAME = "agents reproduction miner"
     MINER_EMAIL = "miner@agents.shoutsid.fyi"
 
-    COMMANDS = %w[mine publish solve serve verify].freeze
+    COMMANDS = %w[mine publish solve serve verify backfill-examinations examine-service].freeze
 
     # How many reports a verifier checks per cycle. Lower than the miner's budget for a reason that
     # is about cost rather than patience: every report is a release of its own to install, and a
@@ -108,7 +109,7 @@ module AgentsMiner
       attr_accessor :command, :package, :top, :queue_pages, :from_version, :to_version, :span,
         :limit, :base_url, :home, :state, :json, :dry_run, :cycles, :ecosystems,
         :budget, :role, :name, :email, :report_budget, :no_sleep, :heartbeat,
-        :workers, :writes_per_hour, :download_mbps, :log_level, :bisect_probes
+        :workers, :writes_per_hour, :download_mbps, :log_level, :bisect_probes, :declaration
 
       def initialize(command: nil, package: [], top: nil, queue_pages: QUEUE_PAGES,
                      from_version: nil, to_version: nil, span: 1, limit: 0,
@@ -118,7 +119,7 @@ module AgentsMiner
                      no_sleep: false, heartbeat: nil, workers: Service::DEFAULT_WORKERS,
                      writes_per_hour: Service::WRITES_PER_HOUR,
                      download_mbps: Service::DOWNLOAD_MBPS, log_level: "INFO",
-                     bisect_probes: Service::BISECT_PROBES)
+                     bisect_probes: Service::BISECT_PROBES, declaration: nil)
         @command = command
         @package = package
         @top = top
@@ -146,6 +147,7 @@ module AgentsMiner
         @download_mbps = download_mbps
         @log_level = log_level
         @bisect_probes = bisect_probes
+        @declaration = declaration
       end
 
       # What a mode reads for its own subcommand's identity: `--ecosystems` as the list a run works,
@@ -298,6 +300,10 @@ module AgentsMiner
           parser.on("--bisect-probes N", Integer,
             "with serve: releases to install per crossing to find the one that broke it; " \
             "0 turns the search off (default #{Service::BISECT_PROBES})") { |value| args.bisect_probes = value }
+          parser.on("--declaration PATH",
+            "with examine-service: the JSON transition to execute and record") do |value|
+            args.declaration = Pathname.new(value)
+          end
           parser.on("--log-level LEVEL", "with serve: DEBUG, INFO, WARNING or ERROR") do |value|
             args.log_level = value
           end
@@ -369,6 +375,8 @@ module AgentsMiner
       Bandwidth.set_limit([args.download_mbps.to_f, 0.0].max * 1_000_000, streams: args.workers)
       return serve(args) if args.command == "serve"
       return verify(args) if args.command == "verify"
+      return backfill_examinations(args) if args.command == "backfill-examinations"
+      return examine_service(args) if args.command == "examine-service"
 
       run_once(args, solve_only: args.command == "solve")
     rescue UsageError => e
@@ -695,6 +703,88 @@ module AgentsMiner
       total = worker.run(cycles: args.cycles, pace: !args.no_sleep)
       log.info("stopped: %s", total.summary)
       0
+    end
+
+    # **Push an existing ledger's examined pairs to the corpus, once.**
+    #
+    # The running service already pushes each cycle's cells (`Service#report_examinations`), so this
+    # exists for the one thing a running service cannot do: hand over the pairs it settled *before*
+    # the corpus had anywhere to put them. On this deployment that is the twenty-thousand-odd clean
+    # pairs the miner has accumulated, and each one is a move the corpus can now answer "examined,
+    # clean" for instead of "nobody has looked".
+    #
+    # It reads the ledger the running service owns, so it is a one-shot an operator runs beside the
+    # service rather than inside it. Idempotent: the service upserts by the cell, so re-running it
+    # re-sends facts it already holds.
+    def self.backfill_examinations(args)
+      Log.level = args.log_level
+      state = args.state || (args.home + "operator.json")
+      key = Corpus.load_or_register(args.base_url, state, name: MINER_NAME, email: MINER_EMAIL)
+      session = Corpus.new(base_url: args.base_url, api_key: key)
+      total = 0
+      Ecosystems.named(args.ecosystems).each do |ecosystem|
+        path = ledger_path_for(args, ecosystem)
+        unless path.exist?
+          $stderr.puts("no ledger at #{path}; nothing to backfill for #{ecosystem.name}")
+          next
+        end
+        ledger = Ledger.load(path)
+        ledger.machine = ecosystem.machine
+        rows = ledger.examinations(ecosystem: ecosystem.name)
+        rows.each_slice(Service::EXAMINATION_PAGE) do |page|
+          session.record_examinations(page)
+          total += page.length
+          $stderr.puts("  #{ecosystem.name}: pushed #{total} cell(s) so far")
+        end
+      end
+      $stderr.puts("backfilled #{total} examined cell(s)")
+      0
+    end
+
+    # **Execute a service, platform or agent transition and record it as examinations.**
+    #
+    # The gem miner installs releases; this runs the commands a non-gem move declares — a deploy, a
+    # health probe, a contract suite — and pushes one cell per check. It is a one-shot rather than a
+    # loop because a transition is somebody's release process, not a queue this client can walk: an
+    # operator runs it beside the deploy they are already making. `--dry-run` prints the cells and
+    # writes nothing, which is how a declaration is checked before it is trusted.
+    def self.examine_service(args)
+      Log.level = args.log_level
+      raise UsageError, "examine-service needs --declaration PATH" if args.declaration.nil?
+
+      plan = Transition.read(args.declaration)
+      cells = Transition.cells(plan, now: Time.now)
+      if args.dry_run
+        $stdout.puts(JSON.pretty_generate("examinations" => cells))
+        return 0
+      end
+
+      state = args.state || (args.home + "operator.json")
+      key = Corpus.load_or_register(args.base_url, state, name: MINER_NAME, email: MINER_EMAIL)
+      session = Corpus.new(base_url: args.base_url, api_key: key)
+      answer = session.record_examinations(cells)
+      $stdout.puts(JSON.pretty_generate(answer)) if args.json
+      logger = Log.logger("agents_miner.transition")
+      logger.info("recorded %d examination(s): %s %s -> %s (%s)",
+        cells.length, plan.library, plan.from_version, plan.to_version,
+        cells.map { |cell| "#{cell["check_kind"]}=#{cell["outcome"]}" }.join(", "))
+      0
+    rescue Transition::Invalid => e
+      raise UsageError, e.message
+    end
+
+    # The ledger one index's state lives in, by the same rule the service uses: the first index
+    # keeps the configured path, the rest get a sibling named for the index. The service's own
+    # `state_for` is the authority; this mirrors it for the one-shot backfill, which runs beside a
+    # service rather than inside it.
+    def self.ledger_path_for(args, ecosystem)
+      store = Pathname.new(args.state || (args.home + "operator.json")).parent + "ledger.json"
+      indexes = Ecosystems.named(args.ecosystems)
+      return store if ecosystem.name == indexes.first.name
+
+      suffix = store.extname
+      suffix = ".json" if suffix.empty?
+      store.sub_ext("-#{ecosystem.name}#{suffix}")
     end
 
     # The verifier: confirm other operators' reports by executing them.

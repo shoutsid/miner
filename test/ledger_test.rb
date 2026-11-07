@@ -30,6 +30,130 @@ class LedgerTest < MinerTest
     assert_equal 0, store.yielded("click")
   end
 
+  # **The negative space, as the corpus's cells.** A settled pair is an examination: `empty` is
+  # `clean`, `done` is `findings`, and the two facts the service could not previously tell apart —
+  # examined and clean, versus never examined — are now rows.
+  def test_a_settled_pair_becomes_an_examination_cell
+    store = Ledger.new(machine: "ruby 3.3.12 cc")
+    store.record_pair("rails", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 100.0)
+    store.record_pair("rails", "7.1.6", "7.2.0", outcome: Ledger::DONE, findings: 2, now: 200.0)
+
+    rows = store.examinations(ecosystem: "ruby")
+    clean = rows.find { |row| row.fetch("to_version") == "7.1.6" && row.fetch("check_kind") == "differential" }
+    findings = rows.find { |row| row.fetch("to_version") == "7.2.0" && row.fetch("check_kind") == "differential" }
+
+    assert_equal "clean", clean.fetch("outcome")
+    assert_equal 0, clean.fetch("finding_count")
+    assert_equal "findings", findings.fetch("outcome")
+    assert_equal 2, findings.fetch("finding_count")
+    assert_equal "differential", clean.fetch("check_kind")
+    assert_equal "3.3.12", clean.fetch("environment").fetch("ruby")
+    assert_equal "cc", clean.fetch("environment").fetch("toolchain")
+  end
+
+  # **Two cells from one examination.** The differential is the symbol comparison; the install is
+  # whether both releases built, which is derivable from the same record and is the question a
+  # caller asks before reading a symbol diff.
+  def test_an_examination_also_records_whether_the_move_installed
+    store = Ledger.new(machine: "ruby 3.3.12 cc")
+    store.record_pair("rails", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 100.0)
+    store.record_pair("nokogiri", "1.0.0", "1.1.0", outcome: Ledger::UNEXAMINABLE, now: 100.0)
+
+    rows = store.examinations(ecosystem: "ruby")
+    installs = rows.select { |row| row.fetch("check_kind") == "install" }
+
+    assert_equal "clean", installs.find { |row| row.fetch("library") == "rails" }.fetch("outcome")
+    assert_equal "unexaminable",
+      installs.find { |row| row.fetch("library") == "nokogiri" }.fetch("outcome")
+  end
+
+  # A load is implied by a differential and recorded anyway: the comparison cannot run unless both
+  # releases required cleanly, so a settled pair is a clean load.
+  def test_an_examination_also_records_whether_the_release_loaded
+    store = Ledger.new(machine: "ruby 3.3.12 cc")
+    store.record_pair("rails", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 100.0)
+
+    loads = store.examinations(ecosystem: "ruby").select { |row| row.fetch("check_kind") == "load" }
+
+    assert_equal 1, loads.length
+    assert_equal "clean", loads.first.fetch("outcome")
+  end
+
+  # **A resolution cell is its own fact and travels with the resolver's own output.** A pair can
+  # compare cleanly and still not resolve beside a framework pin, so the two are not folded into
+  # one. A pair with no resolution asked emits no cell, which is not the same as a pass.
+  def test_a_resolution_cell_is_emitted_only_when_one_was_asked
+    store = Ledger.new(machine: "ruby 3.3.12 cc")
+    store.record_pair("actionpack", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 100.0)
+
+    refute(store.examinations(ecosystem: "ruby").any? { |row| row.fetch("check_kind") == "resolve" })
+
+    store.record_pair("actionpack", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 200.0,
+      resolve: "findings", resolve_note: "Could not find compatible versions")
+
+    cells = store.examinations(ecosystem: "ruby").select { |row| row.fetch("check_kind") == "resolve" }
+    assert_equal 1, cells.length
+    assert_equal "findings", cells.first.fetch("outcome")
+    assert_includes cells.first.fetch("evidence").fetch("resolver"), "Could not find compatible"
+  end
+
+  # A re-record without a resolution keeps the last answer rather than clearing it: a differential
+  # re-run does not un-ask the resolver.
+  def test_a_re_record_without_a_resolution_keeps_the_last_answer
+    store = Ledger.new(machine: "ruby 3.3.12 cc")
+    store.record_pair("rails", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 100.0,
+      resolve: "clean", resolve_note: "resolved")
+    store.record_pair("rails", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 200.0)
+
+    assert_equal "clean", store.pair("rails", "7.1.0", "7.1.6").resolve
+  end
+
+  # **A boot cell is its own fact and travels with the host's own output.** A release can require
+  # cleanly and still refuse to come up, so `load` and `boot` are not folded into one.
+  def test_a_boot_cell_is_emitted_only_when_one_was_asked
+    store = Ledger.new(machine: "ruby 3.3.12 cc")
+    store.record_pair("actionpack", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 100.0)
+
+    refute(store.examinations(ecosystem: "ruby").any? { |row| row.fetch("check_kind") == "boot" })
+
+    store.record_pair("actionpack", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 200.0,
+      boot: "findings", boot_note: "the release failed to boot: exit 1")
+
+    cells = store.examinations(ecosystem: "ruby").select { |row| row.fetch("check_kind") == "boot" }
+    assert_equal 1, cells.length
+    assert_equal "findings", cells.first.fetch("outcome")
+    assert_includes cells.first.fetch("evidence").fetch("host"), "failed to boot"
+  end
+
+  # A pair that is neither settled nor a fact about the machine is not an examination: a `failed`
+  # pair is work again, so it is sent as `failed` rather than as a clean one, and a pair still due
+  # is not sent at all.
+  def test_a_failed_pair_is_sent_as_failed_and_an_unsettled_pair_is_not_sent
+    store = Ledger.new(machine: "ruby 3.3.12 cc")
+    store.record_pair("rails", "7.1.0", "7.1.6", outcome: Ledger::FAILED, now: 100.0)
+    store.record_pair("rails", "7.1.6", "7.2.0", outcome: Ledger::UNEXAMINABLE, now: 100.0)
+
+    rows = store.examinations(ecosystem: "ruby")
+    outcomes = rows.to_h { |row| [row.fetch("from_version"), row.fetch("outcome")] }
+
+    assert_equal "failed", outcomes.fetch("7.1.0")
+    assert_equal "unexaminable", outcomes.fetch("7.1.6")
+  end
+
+  # `since:` bounds a push to a cycle's own work, so a running service sends what it just did
+  # rather than the whole ledger every ten minutes.
+  def test_a_since_bound_sends_only_the_pairs_touched_after_it
+    store = Ledger.new(machine: "ruby 3.3.12 cc")
+    store.record_pair("rails", "7.0.0", "7.1.0", outcome: Ledger::EMPTY, now: 100.0)
+    store.record_pair("rails", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 300.0)
+
+    rows = store.examinations(ecosystem: "ruby", since: 200.0)
+                   .select { |row| row.fetch("check_kind") == "differential" }
+
+    assert_equal 1, rows.length
+    assert_equal "7.1.6", rows.first.fetch("to_version")
+  end
+
   def test_a_failed_pair_is_retried_once_its_wait_is_over
     # A package that could not be installed because the index was briefly down is a package that
     # can be examined in an hour — which is the difference between a ledger that helps and one

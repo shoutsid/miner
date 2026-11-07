@@ -2,6 +2,7 @@
 
 require "fileutils"
 require "json"
+require "time"
 
 require_relative "errors"
 require_relative "machine"
@@ -135,10 +136,11 @@ module AgentsMiner
     # What happened to one upgrade, and when it may be tried again.
     #
     class PairRecord
-      FIELDS = %w[attempts findings filed outcome at next_at note release machine].freeze
+      FIELDS = %w[attempts findings filed outcome at next_at note release machine resolve
+        resolve_note boot boot_note].freeze
 
       attr_accessor :attempts, :findings, :filed, :outcome, :at, :next_at, :note, :release,
-        :machine
+        :machine, :resolve, :resolve_note, :boot, :boot_note
 
       # `release` and `machine` are additive with defaults, so no schema bump: bumping would
       # have set every existing ledger aside and redone months of settled work.
@@ -153,8 +155,21 @@ module AgentsMiner
       # would be to distrust facts established a moment ago on the machine asking. Spelled
       # `interpreter` in a ledger written before the toolchain was named, and `from_h` reads
       # that spelling, because the two are one fact.
+      #
+      # `resolve` is the resolution cell's own outcome, when one was attempted: `clean` when a
+      # minimal Gemfile naming the release resolved, `findings` when Bundler refused it, and
+      # `unexaminable` when the resolver could not run at all. It is a *separate* fact from the
+      # differential's outcome — a pair can compare cleanly and still not resolve beside a
+      # framework pin — and empty means nobody asked, which is not the same as a pass.
+      # `resolve_note` is the resolver's own output, bounded, so the cell's evidence travels with
+      # its outcome rather than being re-derived.
+      #
+      # `boot` and `boot_note` are the same shape for the boot cell: whether the release came up in
+      # a host, and the host's own output. Separate from `load` because a release can require
+      # cleanly and still refuse to boot.
       def initialize(attempts: 0, findings: 0, filed: 0, outcome: FAILED, at: 0.0, next_at: 0.0,
-                     note: "", release: "", machine: "")
+                     note: "", release: "", machine: "", resolve: "", resolve_note: "",
+                     boot: "", boot_note: "")
         @attempts = attempts
         @findings = findings
         @filed = filed
@@ -164,12 +179,17 @@ module AgentsMiner
         @note = note
         @release = release
         @machine = machine
+        @resolve = resolve
+        @resolve_note = resolve_note
+        @boot = boot
+        @boot_note = boot_note
       end
 
       def to_h
         { "attempts" => @attempts, "findings" => @findings, "filed" => @filed,
           "outcome" => @outcome, "at" => @at, "next_at" => @next_at, "note" => @note,
-          "release" => @release, "machine" => @machine }
+          "release" => @release, "machine" => @machine, "resolve" => @resolve,
+          "resolve_note" => @resolve_note, "boot" => @boot, "boot_note" => @boot_note }
       end
 
       # One record, reading the field that was renamed on the way in, and refusing a field this
@@ -197,7 +217,11 @@ module AgentsMiner
           next_at: record.fetch("next_at", 0.0),
           note: record.fetch("note", ""),
           release: record.fetch("release", ""),
-          machine: record.fetch("machine", "")
+          machine: record.fetch("machine", ""),
+          resolve: record.fetch("resolve", ""),
+          resolve_note: record.fetch("resolve_note", ""),
+          boot: record.fetch("boot", ""),
+          boot_note: record.fetch("boot_note", "")
         )
       end
     end
@@ -381,7 +405,8 @@ module AgentsMiner
 
     # Write down what this attempt did, and when the next one is allowed.
     def record_pair(package, from_version, to_version, outcome:, findings: 0, filed: 0,
-                    next_at: nil, note: "", release: "", now: nil, machine: nil)
+                    next_at: nil, note: "", release: "", now: nil, machine: nil, resolve: nil,
+                    resolve_note: nil, boot: nil, boot_note: nil)
       moment = now.nil? ? Time.now.to_f : now
       previous = pair(package, from_version, to_version) || PairRecord.new
       record = PairRecord.new(
@@ -393,7 +418,14 @@ module AgentsMiner
         next_at: next_at.nil? ? moment : next_at,
         note: note,
         release: release.empty? ? previous.release : release,
-        machine: machine.nil? ? @machine : machine
+        machine: machine.nil? ? @machine : machine,
+        # **A resolution cell is its own fact, and a re-record without one keeps the last.** A
+        # differential re-run does not un-ask the resolver, so `resolve: nil` leaves the previous
+        # answer standing rather than clearing it.
+        resolve: resolve.nil? ? previous.resolve : resolve,
+        resolve_note: resolve_note.nil? ? previous.resolve_note : resolve_note,
+        boot: boot.nil? ? previous.boot : boot,
+        boot_note: boot_note.nil? ? previous.boot_note : boot_note
       )
       @pairs[Ledger.key(package, from_version, to_version)] = record
       # The derived indexes are reads of these records, and one just changed.
@@ -500,6 +532,180 @@ module AgentsMiner
             { package: package, release: release, reason: note }
           end
         end }
+    end
+
+    # --- examinations ---------------------------------------------------------------------
+
+    # **The pairs this ledger has examined, as the corpus's `examinations` rows.**
+    #
+    # A pair is a differential: two releases, one check, one outcome. The corpus could not record
+    # the *clean* half of that before — a pair that found nothing was the miner's own private
+    # knowledge — so this is where the negative space becomes a fact the service can answer with.
+    #
+    # The four ledger outcomes map onto the four service outcomes, and the mapping is deliberate
+    # rather than mechanical: `empty` is `clean` (examined, nothing found), `done` is `findings`,
+    # `unexaminable` is `unexaminable` (a fact about this machine), and `failed` is `failed` (the
+    # examination itself failed, and it is work again). A pair that is none of those — one still
+    # due, one mid-flight — is not an examination and is not sent.
+    #
+    # `since:` bounds the push to the pairs touched at or after a moment, so a cycle sends its own
+    # work rather than the whole ledger; a nil `since` is the backfill, and the caller pages it.
+    #
+    # **`after:` is a cursor, and it is what makes a paged push advance.** The ledger is a Hash in
+    # insertion order, so `limit` alone would return the same first page every cycle; a caller that
+    # remembers the last *pair key* it sent passes it back and reaches the rest. It returns
+    # `[rows, cursor]`: `cursor` is the last pair key included, or nil when the page reached the end.
+    def examination_page(ecosystem:, machine: nil, since: nil, limit: nil, after: nil)
+      stamp = machine.nil? ? @machine : machine
+      rows = []
+      cursor = nil
+      pairs = 0
+      reached_cursor = after.nil?
+      @pairs.each do |key, record|
+        # **The cursor is a position, not an ordering.** The ledger's insertion order is not
+        # alphabetical, so `key <= after` would skip the wrong pairs; instead the walk skips every
+        # pair up to and including the one the caller last sent, then resumes.
+        unless reached_cursor
+          reached_cursor = key == after
+          next
+        end
+        next unless EXAMINED_OUTCOMES.key?(record.outcome)
+        next if since && record.at < since
+        break if limit && pairs >= limit
+
+        cursor = key
+        pairs += 1
+        rows.concat(cells_for(key, record, ecosystem: ecosystem, stamp: stamp))
+      end
+      [rows, cursor]
+    end
+
+    # Every examined pair, flat. The backfill's read; a running service uses `examination_page` so a
+    # page is bounded and the next one advances.
+    def examinations(ecosystem:, machine: nil, since: nil, limit: nil, after: nil)
+      rows, = examination_page(ecosystem: ecosystem, machine: machine, since: since, limit: limit,
+        after: after)
+      limit ? rows.first(limit) : rows
+    end
+
+    def cells_for(key, record, ecosystem:, stamp:)
+      package, from_version, to_version = key.split(" ")
+      from_version, to_version = from_version.to_s.split("->", 2)
+      base = {
+        "ecosystem" => ecosystem,
+        "subject_kind" => "package",
+        "library" => package,
+        "from_version" => from_version,
+        "to_version" => to_version,
+        "interpreter" => interpreter_of(stamp),
+        "environment" => environment_of(ecosystem, stamp),
+        "machine" => stamp,
+        "examined_at" => Time.at(record.at).utc.iso8601
+      }
+      # **Three cells from one examination, because they answer different questions.** The
+      # differential is the symbol comparison; the install is whether both releases built; the load
+      # is whether both required cleanly. The last two are derivable from the same record — a pair
+      # that was compared necessarily installed and loaded, and a pair that could not be examined
+      # did not — and recording them separately is what lets a caller ask "does this move install"
+      # or "does this release load" without reading a symbol diff.
+      [
+        base.merge(
+          "check_kind" => "differential",
+          "outcome" => EXAMINED_OUTCOMES.fetch(record.outcome),
+          "checks" => [{ "name" => "differential", "status" => record.outcome,
+                         "detail" => record.note.to_s[0, 200] }],
+          "finding_count" => record.findings.to_i,
+          "report_ids" => [],
+          "evidence" => { "release" => record.release.to_s }.reject { |_k, v| v.empty? }
+        ),
+        base.merge(
+          "check_kind" => "install",
+          "outcome" => INSTALL_OUTCOMES.fetch(record.outcome),
+          "checks" => [{ "name" => "install", "status" => record.outcome,
+                         "detail" => record.note.to_s[0, 200] }],
+          "finding_count" => 0,
+          "report_ids" => [],
+          "evidence" => { "release" => record.release.to_s }.reject { |_k, v| v.empty? }
+        ),
+        base.merge(
+          "check_kind" => "load",
+          "outcome" => INSTALL_OUTCOMES.fetch(record.outcome),
+          "checks" => [{ "name" => "load", "status" => record.outcome,
+                         "detail" => record.note.to_s[0, 200] }],
+          "finding_count" => 0,
+          "report_ids" => [],
+          "evidence" => { "release" => record.release.to_s }.reject { |_k, v| v.empty? }
+        ),
+        # **The resolution cell, when one was attempted.** It is a separate fact from the
+        # differential: a pair can compare cleanly and still not resolve beside a framework pin.
+        # Empty means nobody asked, which is not the same as a pass, so no cell is emitted.
+        *resolve_cell(base, record),
+        # **The boot cell, when one was attempted.** A release can require cleanly and still refuse
+        # to boot; the host's own output is the evidence.
+        *boot_cell(base, record)
+      ]
+    end
+
+    # The `resolve` cell, or nothing when no resolver run was recorded. Its evidence is the
+    # resolver's own output, bounded, so the exit code and Bundler's sentence travel with the
+    # outcome.
+    def resolve_cell(base, record)
+      return [] if record.resolve.to_s.empty?
+
+      [base.merge(
+        "check_kind" => "resolve",
+        "outcome" => record.resolve,
+        "checks" => [{ "name" => "resolve", "status" => record.resolve,
+                       "detail" => record.resolve_note.to_s[0, 200] }],
+        "finding_count" => 0,
+        "report_ids" => [],
+        "evidence" => { "resolver" => record.resolve_note.to_s[0, 2_000] }
+      )]
+    end
+
+    # The `boot` cell, or nothing when no boot was recorded.
+    def boot_cell(base, record)
+      return [] if record.boot.to_s.empty?
+
+      [base.merge(
+        "check_kind" => "boot",
+        "outcome" => record.boot,
+        "checks" => [{ "name" => "boot", "status" => record.boot,
+                       "detail" => record.boot_note.to_s[0, 200] }],
+        "finding_count" => 0,
+        "report_ids" => [],
+        "evidence" => { "host" => record.boot_note.to_s[0, 2_000] }
+      )]
+    end
+
+    # The ledger's outcome words, mapped to the service's. Named here rather than in the service
+    # because it is the ledger's vocabulary being translated, and a second copy in the client's
+    # HTTP layer would be a second place the two could disagree.
+    EXAMINED_OUTCOMES = {
+      DONE => "findings", EMPTY => "clean", UNEXAMINABLE => "unexaminable", FAILED => "failed"
+    }.freeze
+
+    # The install cell's outcome, from the same record: a pair that was compared built both
+    # releases, so its install is clean; a pair that could not be examined did not.
+    INSTALL_OUTCOMES = {
+      DONE => "clean", EMPTY => "clean", UNEXAMINABLE => "unexaminable", FAILED => "failed"
+    }.freeze
+
+    # The interpreter half of a machine stamp: `ruby 3.3.12 cc` -> `ruby 3.3.12`.
+    def interpreter_of(machine)
+      machine.to_s.split(" ")[0, 2].join(" ")
+    end
+
+    # The structured environment a cell ran in. The interpreter and the toolchain are the two
+    # halves the stamp already carries, split into the keys a reader can filter on — `ruby` for a
+    # gem, `python` for a wheel — so `GET /api/releases/compatibility` can find the executed
+    # resolution for one Ruby version.
+    def environment_of(ecosystem, machine)
+      words = machine.to_s.split(" ")
+      toolchain = words.last.to_s
+      version = words[1].to_s
+      key = ecosystem == "ruby" ? "ruby" : "python"
+      { key => version, "toolchain" => toolchain }
     end
 
     # --- reports --------------------------------------------------------------------------

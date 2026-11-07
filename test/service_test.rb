@@ -197,6 +197,23 @@ class ServiceTest < MinerTest
 
       { "recorded" => records.length }
     end
+
+    def record_examinations(records)
+      # The cells a cycle examined, recorded so a test can ask whether the clean ones travelled and
+      # not only that a cycle ran.
+      @calls << ["examinations", records]
+      raise Errors::CorpusError, "refused" if @raise_on.include?("examinations")
+
+      { "recorded" => records.length }
+    end
+
+    def record_release_notes(records)
+      # A release's own words, recorded so a test can ask whether the changelog travelled.
+      @calls << ["notes", records]
+      raise Errors::CorpusError, "refused" if @raise_on.include?("notes")
+
+      { "recorded" => records.length }
+    end
   end
 
   # A fake that pages like the real feed: rows after the cursor, oldest first.
@@ -517,6 +534,39 @@ class ServiceTest < MinerTest
     assert_equal 1, record.attempts
   end
 
+  # **The resolution cell is attempted beside the differential, and only for Ruby.** `bundle lock`
+  # is Bundler's, so a Python pair asks nothing; a Ruby pair asks once, and the answer is recorded
+  # on the pair and pushed as a `resolve` cell.
+  def test_a_ruby_pair_records_a_resolution_cell
+    store = Ledger.new(machine: "ruby 3.3.12 cc")
+    pair = AgentsMiner::Pair.of(package: "actionpack", from_version: "7.1.0", to_version: "7.1.6",
+      ecosystem: "ruby")
+    store.record_pair("actionpack", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 100.0)
+    session = FakeSession.new(one_page)
+    miner = Service.new(session: session, home: @home, state: @home + "ledger.json",
+      watchlist: [], ledger: store, ecosystems: [AgentsMiner::Ecosystems::RUBY])
+    calls = 0
+    replace(AgentsMiner::Resolver, :resolve_cell, lambda do |_gem, _version, suffix: ""|
+      _ = suffix
+      calls += 1
+      { outcome: "clean", note: "resolved" }
+    end)
+
+    resolve = miner.resolve_for(pair)
+
+    assert_equal "clean", resolve.fetch(:outcome)
+    assert_equal 1, calls
+  end
+
+  def test_a_python_pair_asks_no_resolution
+    store = Ledger.new(machine: "cpython 3.12 manylinux")
+    pair = AgentsMiner::Pair.of(package: "sqlalchemy", from_version: "1.4.54", to_version: "2.0.54")
+    session = FakeSession.new(one_page)
+    miner = make(session, findings: [], ledger: store)
+
+    assert_nil miner.resolve_for(pair)
+  end
+
   def test_a_release_that_cannot_be_built_is_settled_once_rather_than_attempted_three_times
     # The other half of the same failure, and the one that costs the schedule: a release the
     # environment cannot produce is a fact about the release, so it is settled on the first attempt,
@@ -589,6 +639,10 @@ class ServiceTest < MinerTest
     paused = Errors::CollectionPaused.new("collection paused: maintenance", ecosystem: "python")
     replace(session, :report_unexaminable,
       ->(*_args, **_kwargs) { raise paused })
+    # The cycle also pushes what it examined, and a paused index refuses that write too — the same
+    # decision, the same reason, and the same "log it and carry on" handling.
+    replace(session, :record_examinations,
+      ->(*_args, **_kwargs) { raise paused })
 
     stats = miner.one_cycle
 
@@ -607,6 +661,29 @@ class ServiceTest < MinerTest
     assert_equal 0, stats.filed
     assert(stats.notes.any? { |note| note.include?("filing failed") })
     assert_equal Ledger::DONE, load.pair("sqlalchemy", "1.4.54", "2.0.54").outcome
+  end
+
+  # **A paged push advances rather than re-sending its first page.** The ledger is a Hash in
+  # insertion order, so a `limit` alone would return the same first page every cycle and never reach
+  # the tail; the cursor is what makes the next cycle start after the last key sent.
+  def test_examinations_are_pushed_in_advancing_pages
+    store = Ledger.new(machine: "cpython 3.12 manylinux")
+    store.record_pair("alpha", "1.0", "2.0", outcome: Ledger::EMPTY, now: 100.0)
+    store.record_pair("beta", "1.0", "2.0", outcome: Ledger::EMPTY, now: 100.0)
+    store.record_pair("gamma", "1.0", "2.0", outcome: Ledger::EMPTY, now: 100.0)
+    session = FakeSession.new(one_page)
+    miner = make(session, findings: [], ledger: store)
+    stats = Service::Stats.new
+
+    miner.report_examinations("python", store, stats, limit: 2)
+    first = session.calls.find { |call| call.first == "examinations" }[1]
+    assert_equal ["alpha", "beta"], first.map { |row| row.fetch("library") }.uniq
+
+    store.record_pair("delta", "1.0", "2.0", outcome: Ledger::EMPTY, now: 200.0)
+    miner.report_examinations("python", store, stats, limit: 2)
+    second = session.calls.reverse.find { |call| call.first == "examinations" }[1]
+    assert_equal ["gamma", "delta"], second.map { |row| row.fetch("library") }.uniq,
+      "the second page must reach the pairs the first page did not"
   end
 
   def test_a_finding_that_could_not_be_sent_leaves_the_pair_unsettled

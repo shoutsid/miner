@@ -54,6 +54,62 @@ class CorpusTest < MinerTest
     assert_equal "http://x/api/reports", http.calls.first[:url]
   end
 
+  # **The negative space, posted as evidence.** A clean pair is the fact the corpus could not
+  # previously store, so the body is the cell the service upserts: one ecosystem, one library, two
+  # releases, the check, the outcome, and the environment the check ran in.
+  def test_examined_cells_are_posted_as_a_bounded_batch
+    http = answer_json({ "recorded" => 1 })
+
+    client(http).record_examinations([
+      { "ecosystem" => "ruby", "library" => "rails", "from_version" => "7.1.0",
+        "to_version" => "7.1.6", "check_kind" => "differential", "outcome" => "clean",
+        "environment" => { "ruby" => "3.3.12" } }
+    ])
+
+    call = http.calls.first
+    assert_equal "POST", call[:method]
+    assert_equal "http://x/api/releases/examinations", call[:url]
+    body = JSON.parse(call[:body])
+    assert_equal 1, body.fetch("examinations").length
+    assert_equal "clean", body.fetch("examinations").first.fetch("outcome")
+  end
+
+  # An empty batch is not a request: a cycle that examined nothing must not spend a write saying so.
+  def test_an_empty_batch_is_not_posted
+    http = answer_json({ "recorded" => 0 })
+
+    client(http).record_examinations([])
+
+    assert_nil http.calls
+  end
+
+  # A release's own words, read from the installed gem and posted as a document. The miner already
+  # has the environment, so this is a directory listing and a bounded read; the service stores the
+  # document and computes the digest.
+  def test_a_release_note_is_posted_as_a_document
+    http = answer_json({ "recorded" => 1 })
+
+    client(http).record_release_notes([
+      { "ecosystem" => "ruby", "library" => "rails", "version" => "7.1.6",
+        "source" => "gem:CHANGELOG.md", "body" => "## 7.1.6\n\n- a change" }
+    ])
+
+    call = http.calls.first
+    assert_equal "POST", call[:method]
+    assert_equal "http://x/api/releases/notes", call[:url]
+    body = JSON.parse(call[:body])
+    assert_equal 1, body.fetch("notes").length
+    assert_equal "gem:CHANGELOG.md", body.fetch("notes").first.fetch("source")
+  end
+
+  def test_an_empty_note_batch_is_not_posted
+    http = answer_json({ "recorded" => 0 })
+
+    client(http).record_release_notes([])
+
+    assert_nil http.calls
+  end
+
   # The whole set, with the stamp that established it. Not a delta: the service's write replaces
   # the index's picture, so a client that sent one release at a time would erase the others, and a
   # release that builds again after an image bump is retracted by being absent.
