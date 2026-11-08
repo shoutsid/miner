@@ -555,11 +555,12 @@ module AgentsMiner
     # insertion order, so `limit` alone would return the same first page every cycle; a caller that
     # remembers the last *pair key* it sent passes it back and reaches the rest. It returns
     # `[rows, cursor]`: `cursor` is the last pair key included, or nil when the page reached the end.
-    def examination_page(ecosystem:, machine: nil, since: nil, limit: nil, after: nil)
+    def examination_page(ecosystem:, machine: nil, since: nil, limit: nil, after: nil, bytes: nil)
       stamp = machine.nil? ? @machine : machine
       rows = []
       cursor = nil
       pairs = 0
+      size = 0
       reached_cursor = after.nil?
       @pairs.each do |key, record|
         # **The cursor is a position, not an ordering.** The ledger's insertion order is not
@@ -573,9 +574,18 @@ module AgentsMiner
         next if since && record.at < since
         break if limit && pairs >= limit
 
+        cells = cells_for(key, record, ecosystem: ecosystem, stamp: stamp)
+        # **A page is cut by bytes as well as by count.** A cell is not a fixed size, so a page the
+        # count bound believes fits can still be refused whole by the service's body bound — the
+        # failure `record_requirements` already fixed for the facts push. The first pair always
+        # goes, even alone, so a page can never stall on one oversized cell.
+        weighed = JSON.generate(cells).bytesize
+        break if bytes && !rows.empty? && size + weighed > bytes
+
+        size += weighed
         cursor = key
         pairs += 1
-        rows.concat(cells_for(key, record, ecosystem: ecosystem, stamp: stamp))
+        rows.concat(cells)
       end
       [rows, cursor]
     end

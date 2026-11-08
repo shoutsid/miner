@@ -129,6 +129,14 @@ module AgentsMiner
     # one rather than re-sending the same first page.
     EXAMINATION_PAIRS = EXAMINATION_PAGE / 3
 
+    # **How many bytes of a page one examinations write may carry.** The count is not the whole
+    # bound: a cell is not a fixed size, so a page the count believes fits can still be refused
+    # whole by the service's body bound — which is exactly what happened on the deployment, where
+    # 166 pairs serialised to about 200 KB against a 64 KiB cap. The page is cut by bytes as well
+    # as by count, the way the facts push already is, and this budget sits below the service's
+    # `Examination::Body::MAX_BODY_BYTES` so a page is refused here before it is refused there.
+    EXAMINATION_BYTES = 1024 * 1024
+
     # How many resolution cells one cycle attempts. A `bundle lock` fetches the whole framework's
     # metadata, so it is the most expensive thing the examining loop does; a cycle that resolved
     # every pair would spend its whole wall clock on the resolver. The rest wait for the next cycle,
@@ -811,7 +819,8 @@ module AgentsMiner
     # catch a pair that changed after its first push.
     def report_examinations(name, ledger, stats, limit: EXAMINATION_PAIRS)
       after = @examination_cursors[name]
-      rows, cursor = ledger.examination_page(ecosystem: name, after: after, limit: limit)
+      rows, cursor = ledger.examination_page(ecosystem: name, after: after, limit: limit,
+        bytes: EXAMINATION_BYTES)
       if rows.empty?
         @examination_cursors[name] = nil
         return
