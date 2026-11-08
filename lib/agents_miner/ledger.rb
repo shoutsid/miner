@@ -360,7 +360,13 @@ module AgentsMiner
           per_package = (index[Ledger.package_of(key)] ||= {})
           next if per_package.key?(record.release)
 
-          per_package[record.release] = lines.empty? ? "" : lines[0][0, 120].to_s
+          # **The reason is kept whole enough to be actionable.** It was cut to 120 characters,
+          # which is shorter than the installer's own sentence: `installing capistrano-passenger
+          # 0.1.1 failed: ERROR:  Error installing capistrano-passenger: / ERROR: Failed to build
+          # gem native extension.` is 139, so the half that says *why* — the native build — was
+          # cut off and 565 recorded facts read as an unexplained failure. The service accepts 300
+          # (`Mining::MiningBody::MAX_REASON`), and that is the bound this keeps.
+          per_package[record.release] = lines.empty? ? "" : lines[0][0, 300].to_s
         end
         @unbuildable_index = index
       end
