@@ -114,11 +114,57 @@ module AgentsMiner
 
     # One installed gem release, and how to run code against it.
     Env = Data.define(:package, :version, :root, :require_path) do
-      # What `require` needs, which is not always the gem name: `rspec-core` is required as
-      # `rspec/core`. The caller resolves it from the gemspec.
+      # What `require` needs, which is not always the gem name.
+      #
+      # **The gem name is a guess, and it is wrong for a whole family of gems.** RubyGems
+      # convention is that a gem is required by a path derived from its name, but the convention
+      # is not a rule and the exceptions are not rare: `aws-sdk-cloudfront` is required by its own
+      # name, `rspec-core` as `rspec/core`, `google-adwords-api` as `google/ads/google_ads`. The
+      # old guess `package.tr("-", "/")` produced `aws/sdk/cloudfront`, a path that does not
+      # exist, so every one of those releases was recorded as "could not load" and marked
+      # unexaminable — a fact about this guess rather than about the gem, and the same failure the
+      # PyPI side fixed by asking the installed distribution instead of guessing.
+      #
+      # So the installed gemspec is asked. The answer is the gem's own name when the gem ships a
+      # file named for it (`lib/aws-sdk-cloudfront.rb`), because that is what `require "<name>"`
+      # loads and the spelling a caller writes; the gem name is also the fallback when the layout
+      # is a plain `lib/<name>.rb`, which is the case the old guess got right.
+      #
+      # A caller that already knows the path passes it and nothing is resolved.
       def self.of(package:, version:, root:, require_path: "")
         new(package: package, version: version, root: root,
-          require_path: require_path.to_s.empty? ? package.tr("-", "/") : require_path)
+          require_path: require_path.to_s.empty? ? entry_point(package, root) : require_path)
+      end
+
+      # The path `require` needs for this gem, read from what was installed rather than guessed
+      # from the name. Falls back to the gem name, which is the one guess that is right more often
+      # than anything else and is what a caller with no gemspec to read would have to use.
+      def self.entry_point(package, root)
+        return package if root.nil?
+
+        spec = (root + "specifications").glob("*.gemspec").find do |file|
+          stem = file.basename.to_s.delete_suffix(".gemspec")
+          stem == package || stem.start_with?("#{package}-")
+        end
+        return package if spec.nil?
+
+        # The gem name is the answer whenever the gem ships a file named for it, because that is
+        # what `require "<name>"` loads and it is the spelling a caller writes. The guess being
+        # replaced was wrong only for gems that do *not* ship one — `aws-sdk-cloudfront` ships
+        # `lib/aws-sdk-cloudfront.rb`, and the old `package.tr("-", "/")` turned that into
+        # `aws/sdk/cloudfront`, a path that does not exist. So the file is looked for first, and
+        # the gem name is the answer when it is there.
+        dirs = spec.read[/require_paths\s*=\s*\[([^\]]*)\]/, 1].to_s.scan(/"([^"]+)"/).flatten
+        dirs = ["lib"] if dirs.empty?
+        dirs.each do |dir|
+          # The version is matched as a prefix so a platform build counts, the same rule
+          # `installed?` uses: `nokogiri-1.16.0-x86_64-linux` is the release `1.16.0`.
+          gems = (root + "gems").glob("#{package}-#{@version}*")
+          return package if gems.any? { |gem| (gem + dir + "#{package}.rb").exist? }
+        end
+        package
+      rescue StandardError
+        package
       end
 
       def gem_home = root.to_s
@@ -358,11 +404,12 @@ module AgentsMiner
     def self.build(package, version, home:, require_path: nil, attempt: 0, timeout: nil)
       root = env_root(home) + release_of(package, version)
       deadline = timeout.nil? ? install_deadline(attempt) : timeout
+      resolved = require_path
       lock_for(root).synchronize do
         # Inside the lock, because a second worker on a shared release must not see a directory
         # that exists and conclude the install finished.
         if installed?(root, package, version)
-          return Env.of(package: package, version: version, root: root, require_path: require_path)
+          return Env.of(package: package, version: version, root: root, require_path: resolved)
         end
 
         scratch = scratch_dir(home)
@@ -394,8 +441,12 @@ module AgentsMiner
             permanent: true, release: Errors.release_of(package, version)
           )
         end
+        # Resolved here, inside the lock and after the install, because it reads the gemspec the
+        # install just wrote. `Env.of` would resolve it again from the same file; doing it once
+        # keeps the two call sites below from disagreeing about a path neither of them chose.
+        resolved = require_path || Env.entry_point(package, root)
       end
-      Env.of(package: package, version: version, root: root, require_path: require_path)
+      Env.of(package: package, version: version, root: root, require_path: resolved)
     end
 
     # Remove what an install that was killed could not clean up itself.

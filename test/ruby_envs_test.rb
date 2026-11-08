@@ -241,6 +241,57 @@ class RubyEnvsTest < MinerTest
     assert_equal 1, calls.length
   end
 
+  # **The require path is read from the installed gem, not guessed from its name.** The guess
+  # `package.tr("-", "/")` turned `aws-sdk-cloudfront` into `aws/sdk/cloudfront`, a path that does
+  # not exist, so every `aws-sdk-*` release was recorded as "could not load" and marked
+  # unexaminable. The gem ships `lib/aws-sdk-cloudfront.rb`, and that is what `require` needs.
+  def test_the_require_path_is_the_gem_name_when_the_gem_ships_a_file_named_for_it
+    root = install_fixture("aws-sdk-cloudfront", "1.147.0", files: ["aws-sdk-cloudfront.rb"])
+
+    assert_equal "aws-sdk-cloudfront", R::Env.entry_point("aws-sdk-cloudfront", root)
+  end
+
+  # The other half: a gem whose entry point is *not* its name — `ruby-macho` is required as
+  # `macho` — is not resolved by this, and falls back to the gem name rather than inventing a
+  # path. The fallback is the honest answer: it is the one guess that is right more often than
+  # anything else, and a release it fails on is genuinely unexaminable by this route.
+  def test_the_require_path_falls_back_to_the_gem_name_when_no_file_is_named_for_it
+    root = install_fixture("ruby-macho", "2.2.0", files: ["macho.rb"])
+
+    assert_equal "ruby-macho", R::Env.entry_point("ruby-macho", root)
+  end
+
+  # A gemspec that declares a non-default `require_paths` is honoured: the file is looked for
+  # under the directory the gem declared, not under `lib` by assumption.
+  def test_the_require_path_is_looked_for_under_the_declared_require_paths
+    root = install_fixture("oddball", "1.0.0", files: ["oddball.rb"], dir: "src",
+      require_paths: '["src"]')
+
+    assert_equal "oddball", R::Env.entry_point("oddball", root)
+  end
+
+  # A caller that already knows the path is not second-guessed, and an environment with no
+  # gemspec to read — a half-built tree — gets the fallback rather than an exception.
+  def test_a_known_require_path_is_kept_and_a_missing_gemspec_falls_back
+    assert_equal "rspec/core",
+      R::Env.of(package: "rspec-core", version: "3.13.0", root: @home,
+        require_path: "rspec/core").require_path
+    assert_equal "ghost", R::Env.entry_point("ghost", @home)
+  end
+
+  # Build a tree shaped the way `gem install --install-dir` leaves one: the payload under
+  # `gems/<name>-<version>/<dir>/`, and the specification under `specifications/`.
+  def install_fixture(package, version, files:, dir: "lib", require_paths: nil)
+    root = @home + "fixture-#{package}-#{version}"
+    (root + "gems" + "#{package}-#{version}" + dir).mkpath
+    files.each { |file| (root + "gems" + "#{package}-#{version}" + dir + file).write("") }
+    (root + "specifications").mkpath
+    paths = require_paths || %(["#{dir}"])
+    (root + "specifications" + "#{package}-#{version}.gemspec")
+      .write("  s.require_paths = #{paths}\n")
+    root
+  end
+
   def test_a_build_that_failed_removes_the_directory_it_was_building_into
     # `gem install` leaves a half-installed tree behind on a native failure, and handing that out
     # later reports the gem as missing for ever.
