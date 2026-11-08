@@ -97,11 +97,20 @@ class RubyEnvsTest < MinerTest
              "make failedNo such file or directory - make\n"
     missing = "ERROR:  Could not find a valid gem 'no-such-gem' (>= 0) in any repository\n"
     network = "ERROR:  While executing gem ... (Gem::RemoteFetcher::FetchError)\n"
+    # **The sentence both cases share.** RubyGems opens with `Could not find a valid gem` when the
+    # version is absent *and* when it could not fetch the index, with the real cause on the next
+    # line. Read by the opening alone, a network blip settled the release for ever — the live
+    # ledger held 2,029 such records whose gem and version both exist and install.
+    unreachable = "ERROR:  Could not find a valid gem 'net-ldap' (= 0.12.1), here is why:\n" \
+                  "Unable to download data from https://rubygems.org/ - " \
+                  "Socket::ResolutionError: Failed to open TCP connection to rubygems.org:443\n"
 
     assert R.cannot_be_built?(native)
     assert R.cannot_be_built?(missing)
     # A fetch error is the network having a moment, not a fact about the release.
     refute R.cannot_be_built?(network)
+    # And the not-found wording is not enough on its own: this one could not reach the index.
+    refute R.cannot_be_built?(unreachable)
   end
 
   def test_a_name_that_went_away_is_read_from_ruby_s_own_message

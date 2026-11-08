@@ -258,21 +258,41 @@ module AgentsMiner
     # The strings are the ones `gem install` actually prints, captured rather than imagined: a
     # native extension with no compiler fails as `make failedNo such file or directory - make`
     # — no space, a real quirk of the message — under RubyGems' own `Failed to build gem native
-    # extension`, and a version that is not on the index answers `Could not find a valid gem`.
-    # Every one of those is a fact about the release and the machine, settled on the first
-    # attempt and recorded against the release: twelve crossings share one release, and
+    # extension`. Every one of those is a fact about the release and the machine, settled on the
+    # first attempt and recorded against the release: twelve crossings share one release, and
     # retrying it twelve times buys nothing.
+    #
+    # **`Could not find a valid gem` is deliberately not one of them, and it used to be.** The
+    # message is not a statement that the version is absent: RubyGems prints the same sentence
+    # when it could not *fetch the index*, with the real cause on the following line —
+    # `Unable to download data from https://rubygems.org/ - Socket::ResolutionError …`. Read as
+    # permanent, a network blip settled the release for ever, and the live ledger held 2,029 such
+    # records whose gem and version both exist and install (measured 2026-11-08: `net-ldap
+    # 0.12.1`, `RedCloth 4.3.2`, `aws-sdk-alexaforbusiness 1.67.0` — every one installs today).
+    # A genuine absence is still permanent, but it is recognised by the line that says so
+    # (`in any repository`, `Possible alternatives`), not by the sentence both cases share.
     def self.cannot_be_built?(output)
+      text = output.to_s
+      return true if ABSENT_FROM_INDEX.any? { |marker| text.include?(marker) }
+
       [
         "Failed to build gem native extension",
         "make failed",
-        "Could not find a valid gem",
         "You have to install development tools first",
         "ERROR:  Error installing",
         "Gem::Ext::BuildError",
         "requires a compiler"
-      ].any? { |marker| output.to_s.include?(marker) }
+      ].any? { |marker| text.include?(marker) }
     end
+
+    # What RubyGems prints when the version really is not on the index, as opposed to when it
+    # could not reach the index. Both open with `Could not find a valid gem`, which is why the
+    # second line is the one that decides.
+    ABSENT_FROM_INDEX = [
+      "in any repository",
+      "Possible alternatives",
+      "Unable to resolve dependency"
+    ].freeze
 
     # The lines of an installer's output that say why it failed.
     #
