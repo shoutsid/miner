@@ -139,6 +139,26 @@ module AgentsMiner
       # The path `require` needs for this gem, read from what was installed rather than guessed
       # from the name. Falls back to the gem name, which is the one guess that is right more often
       # than anything else and is what a caller with no gemspec to read would have to use.
+      #
+      # **The candidates are read from the gem's own `lib/`, and the gem name is only one of
+      # them.** RubyGems has no rule for this — the entry point is whatever the gem's README says —
+      # so the tree is what decides, and the shapes it takes are all in the live corpus:
+      #
+      #   `aws-sdk-cloudfront` -> `lib/aws-sdk-cloudfront.rb`   the name itself
+      #   `cocoapods-trunk`    -> `lib/cocoapods_trunk.rb`      the name, underscored
+      #   `toml-rb`            -> `lib/toml.rb`                 the first segment
+      #   `inspec-core`        -> `lib/inspec.rb`               the first segment
+      #   `ruby-macho`         -> `lib/macho.rb`                the last segment
+      #   `dogstatsd-ruby`     -> `lib/datadog/statsd.rb`       the only file it ships
+      #
+      # Every candidate is checked for existence, so a wrong guess costs a `stat` and not a
+      # refused release. The last rule is the honest one for a gem that ships exactly one file:
+      # one file is one entry point, whatever it is called. When none of them exists the gem name
+      # is returned, and a release that still will not load is genuinely unexaminable.
+      #
+      # This replaces a guess about the name (`package.tr("-", "/")`) that produced
+      # `aws/sdk/cloudfront` — a path that has never existed — and recorded 91 distinct gems as
+      # unexaminable for a fact about our spelling rather than about the gem.
       def self.entry_point(package, root)
         return package if root.nil?
 
@@ -148,23 +168,35 @@ module AgentsMiner
         end
         return package if spec.nil?
 
-        # The gem name is the answer whenever the gem ships a file named for it, because that is
-        # what `require "<name>"` loads and it is the spelling a caller writes. The guess being
-        # replaced was wrong only for gems that do *not* ship one — `aws-sdk-cloudfront` ships
-        # `lib/aws-sdk-cloudfront.rb`, and the old `package.tr("-", "/")` turned that into
-        # `aws/sdk/cloudfront`, a path that does not exist. So the file is looked for first, and
-        # the gem name is the answer when it is there.
         dirs = spec.read[/require_paths\s*=\s*\[([^\]]*)\]/, 1].to_s.scan(/"([^"]+)"/).flatten
         dirs = ["lib"] if dirs.empty?
+        # The version is matched as a prefix so a platform build counts, the same rule
+        # `installed?` uses: `nokogiri-1.16.0-x86_64-linux` is the release `1.16.0`.
+        gems = (root + "gems").glob("#{package}-#{@version}*")
         dirs.each do |dir|
-          # The version is matched as a prefix so a platform build counts, the same rule
-          # `installed?` uses: `nokogiri-1.16.0-x86_64-linux` is the release `1.16.0`.
-          gems = (root + "gems").glob("#{package}-#{@version}*")
-          return package if gems.any? { |gem| (gem + dir + "#{package}.rb").exist? }
+          lib = gems.map { |gem| gem + dir }.find(&:directory?)
+          next if lib.nil?
+
+          candidates(package).each do |candidate|
+            return candidate if (lib + "#{candidate}.rb").exist?
+          end
+
+          # One file under the gem's directory is one entry point, whatever it is called.
+          files = lib.glob("**/*.rb").reject { |file| file.basename.to_s.start_with?("_") }
+          return files.first.relative_path_from(lib).to_s.delete_suffix(".rb") if files.length == 1
         end
         package
       rescue StandardError
         package
+      end
+
+      # The spellings a gem's entry point takes, most specific first. The whole name in both
+      # separator styles, then each hyphen-separated segment — `toml-rb` ships `lib/toml.rb`,
+      # `ruby-macho` ships `lib/macho.rb`, and both are the segment rather than the name.
+      def self.candidates(package)
+        segments = package.split("-").reject(&:empty?)
+        ([package, package.tr("-", "_"), package.tr("_", "-")] + segments + [segments.last].compact)
+          .compact.uniq
       end
 
       def gem_home = root.to_s

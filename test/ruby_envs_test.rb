@@ -260,14 +260,45 @@ class RubyEnvsTest < MinerTest
     assert_equal "aws-sdk-cloudfront", R::Env.entry_point("aws-sdk-cloudfront", root)
   end
 
-  # The other half: a gem whose entry point is *not* its name — `ruby-macho` is required as
-  # `macho` — is not resolved by this, and falls back to the gem name rather than inventing a
-  # path. The fallback is the honest answer: it is the one guess that is right more often than
-  # anything else, and a release it fails on is genuinely unexaminable by this route.
-  def test_the_require_path_falls_back_to_the_gem_name_when_no_file_is_named_for_it
+  # The other half: a gem whose entry point is *not* its name — `ruby-macho` ships `lib/macho.rb`
+  # — is resolved from the file that is there, not from a guess. The old fallback returned the gem
+  # name, which does not load.
+  def test_the_require_path_is_the_file_the_gem_ships_when_it_is_not_named_for_the_gem
     root = install_fixture("ruby-macho", "2.2.0", files: ["macho.rb"])
 
-    assert_equal "ruby-macho", R::Env.entry_point("ruby-macho", root)
+    assert_equal "macho", R::Env.entry_point("ruby-macho", root)
+  end
+
+  # A gem whose only file is nested — `dogstatsd-ruby` ships `lib/datadog/statsd.rb` and nothing
+  # else — has one entry point, and it is that file.
+  def test_the_require_path_is_the_only_file_when_the_gem_ships_exactly_one
+    root = install_fixture("dogstatsd-ruby", "4.5.0", files: ["datadog/statsd.rb"])
+
+    assert_equal "datadog/statsd", R::Env.entry_point("dogstatsd-ruby", root)
+  end
+
+  # A gem named for one thing but shipped as another takes its first segment: `toml-rb` ships
+  # `lib/toml.rb`, `inspec-core` ships `lib/inspec.rb`.
+  def test_the_require_path_is_the_first_segment_when_the_gem_ships_it
+    root = install_fixture("toml-rb", "0.2.1", files: ["toml.rb", "toml/parser.rb"])
+
+    assert_equal "toml", R::Env.entry_point("toml-rb", root)
+  end
+
+  # And its last segment when that is the one: `ruby-macho` ships `lib/macho.rb` among ten other
+  # files, so neither the whole name nor the single-file rule reaches it.
+  def test_the_require_path_is_the_last_segment_when_the_gem_ships_it
+    root = install_fixture("ruby-macho", "2.2.0", files: ["macho.rb", "macho/view.rb", "macho/tools.rb"])
+
+    assert_equal "macho", R::Env.entry_point("ruby-macho", root)
+  end
+
+  # A hyphenated gem name is normalised to the underscore file it ships: `cocoapods-trunk` ships
+  # `lib/cocoapods_trunk.rb`.
+  def test_the_require_path_normalises_the_gem_name_to_the_file_it_ships
+    root = install_fixture("cocoapods-trunk", "0.5.1", files: ["cocoapods_trunk.rb"])
+
+    assert_equal "cocoapods_trunk", R::Env.entry_point("cocoapods-trunk", root)
   end
 
   # A gemspec that declares a non-default `require_paths` is honoured: the file is looked for
@@ -292,8 +323,11 @@ class RubyEnvsTest < MinerTest
   # `gems/<name>-<version>/<dir>/`, and the specification under `specifications/`.
   def install_fixture(package, version, files:, dir: "lib", require_paths: nil)
     root = @home + "fixture-#{package}-#{version}"
-    (root + "gems" + "#{package}-#{version}" + dir).mkpath
-    files.each { |file| (root + "gems" + "#{package}-#{version}" + dir + file).write("") }
+    files.each do |file|
+      path = root + "gems" + "#{package}-#{version}" + dir + file
+      path.dirname.mkpath
+      path.write("")
+    end
     (root + "specifications").mkpath
     paths = require_paths || %(["#{dir}"])
     (root + "specifications" + "#{package}-#{version}.gemspec")

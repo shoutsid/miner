@@ -1161,6 +1161,13 @@ module AgentsMiner
       # behind it. Every result is recorded here, on the cycle's thread.
       admitted.length.times do
         pair, findings, error, raised, resolve, boot = results.pop
+        # **The heartbeat is touched as work completes, not only when the cycle closes.** A cycle
+        # is `@budget` pairs of installs and interpreter starts, and on the deployment one ran for
+        # 1h43m — past the 90-minute heartbeat window the container's healthcheck reads, so a
+        # miner that was working the whole time reported `unhealthy` and would have paged someone.
+        # A pair finishing is the honest signal that the loop is turning; the end of the cycle is
+        # only the last of them.
+        touch
         if raised
           @log.error("examining %s %s->%s failed: %s: %s",
             pair.package, pair.from_version, pair.to_version, raised.class, raised.message)
@@ -1529,7 +1536,13 @@ module AgentsMiner
       pair = pairs.first
       begin
         before = build(pair, pair.from_version)
+        # **The heartbeat is touched between the two builds.** Answering a report builds two
+        # releases and runs a differential, which is minutes of installs; a cycle that spends its
+        # wall clock here is working, and the container's healthcheck reads the heartbeat rather
+        # than the log.
+        touch
         after = build(pair, pair.to_version)
+        touch
         # Through the index's own differential, like the mining path: the solver is settling a
         # claim about *this* package's releases, and a Python probe run against a gem would be
         # evidence about nothing.

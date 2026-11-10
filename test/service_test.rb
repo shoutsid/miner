@@ -821,6 +821,28 @@ class ServiceTest < MinerTest
     assert_operator beat.read.to_f, :>, 0
   end
 
+  # **A cycle is longer than the window the healthcheck reads, so the beat is touched as work
+  # finishes.** On the deployment a cycle ran 1h43m against a 90-minute heartbeat window, so a
+  # miner that was working the whole time reported `unhealthy`. The pair completing is the signal
+  # that the loop is turning; the end of the cycle is only the last of them.
+  def test_the_heartbeat_is_touched_as_each_pair_completes
+    beat = @home + "heartbeat"
+    miner = Service.new(session: FakeSession.new([]), home: @home, state: @home + "ledger.json",
+      watchlist: [], ledger: Ledger.new, heartbeat: beat)
+    miner.define_singleton_method(:examine) { |_pair| [[], nil] }
+    touched = 0
+    miner.define_singleton_method(:touch) do
+      touched += 1
+      super()
+    end
+
+    miner.mine_all((0...3).map { |index| pair_named(index) }, Service::Stats.new)
+
+    # Once per completed pair: three pairs, three beats. The old implementation touched only at the
+    # end of the cycle, so a cycle longer than the healthcheck's window read as a dead miner.
+    assert_equal 3, touched
+  end
+
   # --- the write budget -------------------------------------------------------------------
 
   def test_the_write_budget_stops_a_cycle_rather_than_the_service
