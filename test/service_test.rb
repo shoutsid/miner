@@ -843,6 +843,35 @@ class ServiceTest < MinerTest
     assert_equal 3, touched
   end
 
+  # **The beat is written on a clock, not on an event.** A single pair installs two releases and
+  # their dependency trees and can run for tens of minutes, so a beat tied to a pair finishing is
+  # silent for the length of one install. The thread is what makes the file mean "the process is
+  # alive" rather than "a pair just happened to finish".
+  def test_the_heartbeat_is_written_on_a_clock_while_the_loop_runs
+    beat = @home + "heartbeat"
+    miner = Service.new(session: FakeSession.new([]), home: @home, state: @home + "ledger.json",
+      watchlist: [], ledger: Ledger.new, heartbeat: beat)
+    # A cycle that never returns, so only the beater thread can write the file.
+    miner.define_singleton_method(:one_cycle) do
+      sleep(2)
+      Service::Stats.new
+    end
+    # The production interval is a minute; this is the same thread on a test's clock.
+    miner.define_singleton_method(:start_beating) { |interval: 0.1| super(interval: interval) }
+
+    thread = Thread.new { miner.run(cycles: 1, pace: false) }
+    sleep(0.3)
+    first = beat.exist? ? beat.read.to_f : nil
+    sleep(1.2)
+    second = beat.exist? ? beat.read.to_f : nil
+    miner.instance_variable_set(:@stop, true)
+    thread.join(5)
+
+    refute_nil first, "the heartbeat was never written"
+    refute_nil second, "the heartbeat was never written"
+    assert_operator second, :>, first, "the heartbeat was not rewritten while the cycle ran"
+  end
+
   # --- the write budget -------------------------------------------------------------------
 
   def test_the_write_budget_stops_a_cycle_rather_than_the_service

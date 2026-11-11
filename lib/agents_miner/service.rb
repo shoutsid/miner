@@ -58,6 +58,14 @@ module AgentsMiner
     CYCLE_SECONDS = 0
     IDLE_SECONDS = 10 * 60
 
+    # How often the heartbeat file is rewritten while the loop is running.
+    #
+    # The container's healthcheck reads a 90-minute window, so this is a tenth of it: a beat this
+    # often cannot miss the window unless the process is genuinely wedged, which is the one thing
+    # the file is for. It is written from a thread rather than from the work, because a single
+    # install can run for tens of minutes and the work is not the only thing worth reporting.
+    HEARTBEAT_SECONDS = 60
+
     # What a failed pair waits before it is tried again. A package that could not be installed
     # because the index was briefly unavailable is worth retrying in an hour; one that cannot be
     # imported at all will fail the same way, and the attempt ceiling in the ledger is what stops
@@ -387,61 +395,100 @@ module AgentsMiner
       Service.install_stop_handlers(self)
       total = Stats.new
       cycle = 0
-      until @stop
-        cycle += 1
-        wait_for = IDLE_SECONDS
-        begin
-          stats = one_cycle
-        rescue Errors::RateLimited => e
-          wait_for = [e.retry_after, 1.0].max
-          @log.warning("write quota spent; waiting %.0fs (%s)", wait_for, e)
-          total.notes << format("rate limited, waited %.0fs", wait_for)
-        rescue Errors::CollectionPaused => e
-          # Not an outage and not a quota: an index this miner works is not taking new evidence, and
-          # the reason is a person's rather than a load's. Info rather than warning because nothing
-          # is wrong and nothing is lost — the pairs that could not be filed are still unsettled, so
-          # the work is there when the pause lifts — and the wait is the interval the service asked
-          # for, which is minutes to hours rather than the idle cycle's ten minutes.
-          wait_for = [e.retry_after, 1.0].max
-          @log.info("collection paused; waiting %.0fs (%s)", wait_for, e)
-          total.notes << "collection paused: #{e}"
-        rescue Errors::CorpusError => e
-          # After the pause branch rather than instead of it: a pause *is* a `CorpusError`, so this
-          # one has to come second or it swallows the refusal and waits the idle cycle. An
-          # unreachable corpus is still not a reason to exit — the service is supposed to be here
-          # when it comes back — and it is the branch that names the trouble in the cycle's notes,
-          # which is the only place a reader sees it.
-          @log.warning("corpus unreachable: %s", e)
-          total.notes << e.message.to_s
-        rescue StandardError => e
-          # The last resort, and it exists for one reason: a background service that exits on an
-          # unexpected error stops the work everybody else is waiting on, and the alternative to
-          # surviving it is a container that restarts in a loop and mines nothing. The traceback is
-          # logged in full, so a real bug is still loud — but a transient one costs a cycle instead
-          # of the process.
-          @log.error("cycle failed; continuing: %s: %s", e.class, e.message)
-          Array(e.backtrace).each { |line| @log.error("  %s", line) }
-          total.notes << "cycle failed; see the log"
-        else
-          Service.accumulate(total, stats)
-          @log.info("cycle %d: %s", cycle, stats.summary)
-          # The plan and the reasons are the only way to tell a service that is thinking from one
-          # that is stuck: the totals alone look the same either way.
-          stats.notes.each { |note| @log.info("  %s", note) }
-          # Waiting ten minutes is right for a cycle with nothing to do and wrong for one that spent
-          # its pair budget learning that a release cannot be built here. The second is progress —
-          # each fact retires every crossing through that release — and treating it as idleness
-          # would take hours to work through a backlog of hundreds, ten minutes a batch.
-          busy = stats.pairs_mined.positive? || stats.answered.positive? ||
-                 stats.unexaminable.positive?
-          wait_for = busy ? CYCLE_SECONDS : IDLE_SECONDS
-        end
-        touch
-        break if cycles.positive? && cycle >= cycles
+      beat = start_beating
+      begin
+        until @stop
+          cycle += 1
+          wait_for = IDLE_SECONDS
+          begin
+            stats = one_cycle
+          rescue Errors::RateLimited => e
+            wait_for = [e.retry_after, 1.0].max
+            @log.warning("write quota spent; waiting %.0fs (%s)", wait_for, e)
+            total.notes << format("rate limited, waited %.0fs", wait_for)
+          rescue Errors::CollectionPaused => e
+            # Not an outage and not a quota: an index this miner works is not taking new evidence, and
+            # the reason is a person's rather than a load's. Info rather than warning because nothing
+            # is wrong and nothing is lost — the pairs that could not be filed are still unsettled, so
+            # the work is there when the pause lifts — and the wait is the interval the service asked
+            # for, which is minutes to hours rather than the idle cycle's ten minutes.
+            wait_for = [e.retry_after, 1.0].max
+            @log.info("collection paused; waiting %.0fs (%s)", wait_for, e)
+            total.notes << "collection paused: #{e}"
+          rescue Errors::CorpusError => e
+            # After the pause branch rather than instead of it: a pause *is* a `CorpusError`, so this
+            # one has to come second or it swallows the refusal and waits the idle cycle. An
+            # unreachable corpus is still not a reason to exit — the service is supposed to be here
+            # when it comes back — and it is the branch that names the trouble in the cycle's notes,
+            # which is the only place a reader sees it.
+            @log.warning("corpus unreachable: %s", e)
+            total.notes << e.message.to_s
+          rescue StandardError => e
+            # The last resort, and it exists for one reason: a background service that exits on an
+            # unexpected error stops the work everybody else is waiting on, and the alternative to
+            # surviving it is a container that restarts in a loop and mines nothing. The traceback is
+            # logged in full, so a real bug is still loud — but a transient one costs a cycle instead
+            # of the process.
+            @log.error("cycle failed; continuing: %s: %s", e.class, e.message)
+            Array(e.backtrace).each { |line| @log.error("  %s", line) }
+            total.notes << "cycle failed; see the log"
+          else
+            Service.accumulate(total, stats)
+            @log.info("cycle %d: %s", cycle, stats.summary)
+            # The plan and the reasons are the only way to tell a service that is thinking from one
+            # that is stuck: the totals alone look the same either way.
+            stats.notes.each { |note| @log.info("  %s", note) }
+            # Waiting ten minutes is right for a cycle with nothing to do and wrong for one that spent
+            # its pair budget learning that a release cannot be built here. The second is progress —
+            # each fact retires every crossing through that release — and treating it as idleness
+            # would take hours to work through a backlog of hundreds, ten minutes a batch.
+            busy = stats.pairs_mined.positive? || stats.answered.positive? ||
+                   stats.unexaminable.positive?
+            wait_for = busy ? CYCLE_SECONDS : IDLE_SECONDS
+          end
+          touch
+          break if cycles.positive? && cycle >= cycles
 
-        wait(wait_for, pace: pace)
+          wait(wait_for, pace: pace)
+        end
+      ensure
+        stop_beating(beat)
       end
       total
+    end
+
+    # **The heartbeat is touched on a clock, not on an event.** A pair installs two releases and
+    # their whole dependency trees, and on the deployment a batch of 48 pairs ran 6 to 9 hours —
+    # so a beat written only when a pair finishes is silent for the length of one install, which
+    # is tens of minutes, and the container's healthcheck reads a 90-minute window. A miner that
+    # was working the whole time reported `unhealthy`.
+    #
+    # A thread rather than a callback threaded through every install: the install is one blocking
+    # call inside the ecosystem, and the beat is about the *process* being alive, which is true
+    # whether it is installing, probing or filing. The thread is a daemon, so a process that exits
+    # does not wait for it, and it is stopped in `run`'s `ensure`.
+    def start_beating(interval: HEARTBEAT_SECONDS)
+      return nil if @heartbeat.nil?
+
+      Thread.new do
+        Thread.current.name = "heartbeat"
+        until @stop
+          touch
+          # Woken in slices so a stop is honoured within a second rather than after the interval,
+          # the same rule `wait` keeps: a process asked to stop must not sit in a sleep.
+          deadline = monotonic + interval
+          while !@stop && monotonic < deadline
+            sleep([1.0, deadline - monotonic].min)
+          end
+        end
+      end
+    end
+
+    def stop_beating(thread)
+      return if thread.nil?
+
+      @stop = true
+      thread.join(5)
     end
 
     # Read the corpus, decide, work, and write down what happened.
