@@ -182,6 +182,42 @@ module AgentsMiner
       found.first(limit)
     end
 
+    # **A caller's own ask for a window to be examined.**
+    #
+    # The corpus grows from a breadth seed and from what its own reads observe; neither can answer
+    # "my gem is not in it". A request is that answer: an operator named a library and two
+    # releases, and the miner works it like any other lead. The result is an ordinary examination
+    # cell, and the *service* marks the request satisfied on the examination write — this client
+    # does not report the satisfaction, because a client-side promise is a state a client can
+    # forget.
+    #
+    # Anonymous, like every other read here. `state` defaults to `open`; `all` reads the history.
+    # A page is bounded by the route's own `limit_max`, so this pages the same way `mining_targets`
+    # does rather than asking for more than one page holds.
+    def examination_requests(ecosystem: "ruby", state: "open", limit: 200, pages: 8)
+      found = []
+      offset = 0
+      [pages, 1].max.times do
+        wanted = limit - found.length
+        break if wanted <= 0
+
+        body = request("GET", "/api/mining/requests",
+          params: { "ecosystem" => ecosystem, "state" => state, "limit" => wanted,
+                    "offset" => offset })
+        items = body["items"].is_a?(Array) ? body["items"] : []
+        rows = items.select { |item| item.is_a?(Hash) && item["library"] }
+        break if rows.empty?
+
+        found.concat(rows)
+        served = body["limit"]
+        break unless served.is_a?(Integer) && served.positive?
+        break if rows.length < [served, wanted].min
+
+        offset += rows.length
+      end
+      found.first(limit)
+    end
+
     # Whether an index is collecting, without asking it for a full work list.
     #
     # This is the one cheap way a client can know before it spends an install: the queue states a

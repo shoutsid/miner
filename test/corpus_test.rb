@@ -252,6 +252,32 @@ class CorpusTest < MinerTest
     assert_includes http.calls[2][:url], "offset=4"
   end
 
+  # **A caller's ask for a window to be examined, read as work.** The request names the two
+  # releases, so the client hands them back whole rather than reducing them to a package name —
+  # the planner adds the exact pair.
+  def test_examination_requests_are_paged_and_carry_their_window
+    pages = [
+      { "count" => 2, "limit" => 2, "items" => [
+        { "library" => "actionpack", "from_version" => "5.0.7.2", "to_version" => "5.1.0",
+          "state" => "open" },
+        { "library" => "kaminari", "from_version" => "0.16.3", "to_version" => "1.0.0",
+          "state" => "open" }
+      ] },
+      { "count" => 1, "limit" => 2, "items" => [
+        { "library" => "rack", "from_version" => "2.2.6", "to_version" => "2.2.6.1",
+          "state" => "open" }
+      ] }
+    ]
+    http = FakeHttp.new { |**_kwargs| response(body: JSON.generate(pages.shift)) }
+
+    rows = client(http).examination_requests(limit: 10)
+
+    assert_equal %w[actionpack kaminari rack], rows.map { |row| row["library"] }
+    assert_equal "5.0.7.2", rows.first["from_version"]
+    assert_includes http.calls[1][:url], "offset=2"
+    assert_includes http.calls.first[:url], "state=open"
+  end
+
   # A page shorter than the service said it would serve is the end of the queue, not a reason
   # to ask for the next one.
   def test_a_short_page_ends_the_paging

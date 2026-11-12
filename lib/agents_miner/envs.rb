@@ -1183,6 +1183,17 @@ module AgentsMiner
       probe_once(env, script, [script.basename.to_s])
     end
 
+    # Execute one dotted reference against one release, verbatim.
+    #
+    # The reference's own text is the script: `numpy.float_`, `Colorize::ClassMethods#magenta`. Used
+    # by a reproduction, which re-runs the comparison the differential made rather than describing
+    # it — the same shape `probe` and `probe_symbol` write, from the expression the probe used.
+    def self.probe_reference(env, module_name, expression, suffix: "")
+      script = env.root + "call_site#{suffix}.py"
+      script.write("import #{module_name}\n\n#{expression}\n")
+      probe_once(env, script, [script.basename.to_s])
+    end
+
     # Execute one call against one release and return what the interpreter said.
     #
     # Verbatim, including the traceback: this is the evidence, and a paraphrase of it would be

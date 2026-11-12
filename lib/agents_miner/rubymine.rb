@@ -197,7 +197,10 @@ module AgentsMiner
             candidate: candidate,
             traceback: RubyEnvs.traceback_of(now, root: after.root),
             accepted_output: RubyEnvs.traceback_of(was, root: before.root),
-            kind: "symbol"
+            kind: "symbol",
+            # **The reference the probe executed.** Carried so a reproduction can write the same
+            # `eval` rather than describe a call it cannot express.
+            expression: expression
           )
           observation = observation.with(moved: where(after, entry, newer, suffix: suffix)) if repair.nil?
           found << observation
@@ -252,7 +255,9 @@ module AgentsMiner
               repair: repair,
               candidate: candidate,
               traceback: RubyEnvs.traceback_of(now, root: after.root),
-              accepted_output: RubyEnvs.traceback_of(was, root: before.root)
+              accepted_output: RubyEnvs.traceback_of(was, root: before.root),
+              # The reference and the keyword, so a reproduction can write the same call.
+              expression: "#{expression}(#{keyword}: 0)"
             )
           end
         end

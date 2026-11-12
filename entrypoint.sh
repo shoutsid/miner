@@ -38,10 +38,12 @@ set -eu
 : "${MINER_WRITES_PER_HOUR:=0}"
 : "${MINER_WORKERS:=2}"
 # How many releases one crossing may install to find the release that actually broke the call.
-# Four is `ceil(log2(k))` for a window of up to sixteen releases; a larger window gets the
-# boundary this cycle and none of the rest, which is the honest answer rather than a guess at
-# which unrun release did it. 0 turns the search off and leaves `introduced_in` absent.
-: "${MINER_BISECT_PROBES:=4}"
+# Eight is `ceil(log2(k))` for a window of up to 256 releases; it is spent only where somebody is
+# waiting — a caller's request — while an advisory lead or an open report gets two and a ladder
+# crossing nobody asked about gets none. A larger window gets the boundary this cycle and none of
+# the rest, which is the honest answer rather than a guess at which unrun release did it. 0 turns
+# the search off and leaves `introduced_in` absent.
+: "${MINER_BISECT_PROBES:=8}"
 # Which index the interval works. The deployment collects one — PyPI is paused — and an
 # image that silently fell back to Python would build environments for votes the service
 # refuses. An operator overriding this is a deliberate act rather than an omission.

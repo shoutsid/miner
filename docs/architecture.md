@@ -91,6 +91,12 @@ corpus's observations: unanswered reports, searches that found nothing, packages
 proven to break callers. The route pages its answer and reports `limit_max`; the client
 reads every page with `offset` instead of asking for a depth the route will refuse.
 
+`GET /api/mining/requests` is the second, and it is read **every cycle** rather than on a slow
+clock: a request names a library and two releases, so it is work for this cycle. The planner adds
+the exact pair ahead of the ladder's crossings and weights the package above a reviewed advisory's
+lead and below an open report. The service marks a matching request `satisfied` when the
+examination is recorded, so the client never reports the satisfaction itself.
+
 The breadth ranking continues the queue up to `--top` packages. The client is the one with a
 route to the outside, so it fetches the ranking and posts it as a seed; the service decides
 what the seed means and when it was read. The queue comes first and the ranking extends it:

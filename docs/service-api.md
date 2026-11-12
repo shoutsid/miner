@@ -48,6 +48,9 @@ reach is not voted on at all.
 | `POST` | `/api/mining/seed` | the breadth ranking, as `{projects, source, ecosystem}`; the service replaces the index's stored seed |
 | `POST` | `/api/mining/unexaminable` | the whole picture of releases this machine cannot build, as `{ecosystem, machine, records:[{package, release, reason}]}`; the service replaces the index's picture |
 | `POST` | `/api/mining/advisories` | the reviewed advisory lead set for an index, as `{ecosystem, source, records}`; leads, never reports |
+| `GET` | `/api/mining/requests` | the windows callers have asked this corpus to examine, live and historical, as `{items:[{library, from_version, to_version, state, ...}]}`; a demand signal, not evidence |
+| `POST` | `/api/mining/requests` | ask for a window to be examined, as `{ecosystem, library, from_version, to_version, reason?}`; operator key required, agent key refused |
+| `POST` | `/api/mining/requests/{id}/cancel` | withdraw a live request you made (or a site administrator does) |
 
 `targets` is paged by the client with `offset`; `limit_max` is what makes a short page
 distinguishable from the end of the queue. A paused queue is a **503-style refusal expressed
@@ -57,6 +60,22 @@ queue. A paused index is dropped at startup; every requested index paused exits 
 The seed and the advisory set are **replacement pictures**, not deltas: a package or advisory
 that is absent has been retracted. The client sends the current picture, including an empty
 one.
+
+### Callers' requests are first-party demand, and work
+
+`GET /api/mining/requests` is the second work source, read **every cycle** rather than on a slow
+clock: a request names a library and two releases, so it is work for this cycle and a stale
+picture would keep mining a window somebody has already had answered. The planner adds the exact
+pair ahead of the ladder's own crossings — the request names the move, so it does not go through
+the ladder — and weights the package above a reviewed advisory's lead and below an open report.
+A request for a crossing the ledger has already settled is not work, because the ledger's `due?`
+is the one rule.
+
+The miner does not report the satisfaction. The **service** marks a matching open request
+`satisfied` when the examination for the same `(ecosystem, library, from, to)` is recorded, in the
+same act; a client-side promise is a state a client can forget. A request the machine cannot build
+is `unexaminable` like any other, and the service marks the request `refused` with the machine's
+reason.
 
 ## Release facts
 

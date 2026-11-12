@@ -52,6 +52,15 @@ module AgentsMiner
     # and one report (2.0).
     LEAD_BONUS = 0.5
 
+    # **What a caller's own request for a window is worth, and why it is above an advisory.**
+    #
+    # A request is first-party demand: somebody asked this service to examine a package by name,
+    # which is the product's own definition of looking. It sits above a reviewed advisory (0.5) and
+    # below an open report (1.0 per report), because a question somebody filed is still the
+    # stronger signal — but a request is a person's ask rather than a third party's claim, so it
+    # outranks a lead.
+    REQUEST_BONUS = 0.75
+
     # How far back through a package's history the miner will go.
     #
     # The crossings are enumerated newest-first, so an unbounded walk keeps going until it runs
@@ -181,13 +190,14 @@ module AgentsMiner
       def plan(reports:, watchlist:, ledger:, history_for:, now:, budget: DEFAULT_BUDGET,
                report_budget: 1, per_package: 1,
                max_fetches: DEFAULT_FETCHES, max_crossings: MAX_CROSSINGS,
-               cache_has: NEVER_CACHED, crossings_of: nil, leads: {}, advisory_of: nil)
+               cache_has: NEVER_CACHED, crossings_of: nil, leads: {}, advisory_of: nil,
+               requests: {})
         ladder = crossings_of || Versions.method(:crossings)
         counts = demand_counts(reports)
         demand = ordered_demand(counts)
         chosen_reports = reports_to_answer(reports, ledger, now: now, budget: report_budget)
-        order = package_order(demand: counts, watchlist: watchlist, ledger: ledger, leads: leads)
-
+        order = package_order(demand: counts, watchlist: watchlist, ledger: ledger, leads: leads,
+          requests: requests)
         due = {}
         withheld = {}
         kinds = Hash.new(0)
@@ -247,10 +257,15 @@ module AgentsMiner
               message.empty? ? e.class.name : message)
             next
           end
+          # **A caller's own request for this package's window, added first.** The request names
+          # the two releases, so it is the most specific thing this package can be mined for — and
+          # putting it ahead of the ladder's crossings is what makes the on-demand answer the
+          # question somebody actually asked rather than the newest line crossing.
           crossings = ladder.call(package, history, limit: max_crossings)
-          found = crossings.select do |pair|
+          found = requested_due(package, requests, ledger, now: now)
+          found.concat(crossings.select do |pair|
             ledger.due?(package, pair.from_version, pair.to_version, now: now)
-          end
+          end)
           # The advisory pairs, added here rather than through the ladder because they reach past
           # `max_crossings` — see `advisory_due` — and deduplicated because a fix's crossing can be
           # one the line ladder produced too.
@@ -324,6 +339,15 @@ module AgentsMiner
           break if pairs.length >= budget
         end
 
+        # **Demand travels with the pair, because the worker spends installs on it.** The planner
+        # is where "somebody is waiting" is known — a report about the library, a caller's request,
+        # a reviewed advisory's lead — and the bisection is where it is spent. Stamping the count
+        # here keeps the search from inventing a second ranking from what it can see locally.
+        pairs = pairs.map do |pair|
+          extra = counts.fetch(pair.package, 0)
+          extra.positive? ? pair.with_demand(pair.demand + extra) : pair
+        end
+
         Plan.new(pairs: pairs, reports: chosen_reports, demand: demand,
           withheld: withheld, kinds: kinds)
       end
@@ -379,11 +403,17 @@ module AgentsMiner
       # packages that can never be touched — the ones with no crossing to examine — take it and
       # hold it. How far into this list a cycle walks is `plan`'s decision, because only `plan`
       # knows what a package cost to look at and whether it found anything.
-      def package_order(demand:, watchlist:, ledger:, leads: {})
+      #
+      # `requests` is a caller's own ask for a window, keyed by package: it adds the package to the
+      # candidates the same way a lead does, and it is weighted above a lead. The exact window it
+      # names is added to the package's due pairs in `plan` rather than here, because only `plan`
+      # has the ledger.
+      def package_order(demand:, watchlist:, ledger:, leads: {}, requests: {})
         # A reviewed advisory adds its package to the candidates, which is the point of a lead: a gem
         # the service's queue has not ranked yet — because no report names it and the breadth seed
         # never reached it — is still worth examining when GitHub reviewed a vulnerability in it.
-        candidates = (demand.keys + leads.keys + watchlist).uniq
+        # A caller's request adds its package the same way, and for the same reason.
+        candidates = (demand.keys + leads.keys + requests.keys + watchlist).uniq
         # The position of each package in the breadth order, built once. `live.index` was the
         # same answer at the cost of a scan per candidate, and a duplicate keeps its FIRST
         # position here, which is what `index` returned.
@@ -392,7 +422,9 @@ module AgentsMiner
 
         scored = candidates.map do |package|
           totals = ledger.package_totals(package)
-          weight = 1 + demand.fetch(package, 0) + (leads.key?(package) ? LEAD_BONUS : 0)
+          weight = 1 + demand.fetch(package, 0) +
+                   (leads.key?(package) ? LEAD_BONUS : 0) +
+                   (requests.key?(package) ? REQUEST_BONUS : 0)
           rate = (totals.yielded + 1).fdiv(totals.settled + YIELD_PRIOR)
           [package, weight * rate, totals.last]
         end
@@ -451,7 +483,27 @@ module AgentsMiner
           pair = advisory_of.call(package, history, fixed_in: fixed_in)
           next if pair.nil? || !ledger.due?(package, pair.from_version, pair.to_version, now: now)
 
-          pair
+          pair.with_demand(1)
+        end
+      rescue StandardError
+        []
+      end
+
+      # The pairs a caller asked for, for one package.
+      #
+      # The request names the two releases itself, so this does not consult the history: a window
+      # somebody asked about is work whether or not the ladder would have produced it. `due?` is
+      # still the rule — a request for a crossing the ledger has settled is not work — and a pair
+      # the ledger cannot place is left to the ladder rather than guessed at.
+      def requested_due(package, requests, ledger, now:)
+        Array(requests[package]).filter_map do |entry|
+          from_version = entry["from_version"] || entry[:from_version]
+          to_version = entry["to_version"] || entry[:to_version]
+          next if from_version.to_s.empty? || to_version.to_s.empty?
+          next unless ledger.due?(package, from_version, to_version, now: now)
+
+          Pair.of(package: package, from_version: from_version, to_version: to_version,
+            demand: 2)
         end
       rescue StandardError
         []

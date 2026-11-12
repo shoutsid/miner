@@ -140,6 +140,54 @@ class LedgerTest < MinerTest
     assert_equal "unexaminable", outcomes.fetch("7.1.6")
   end
 
+  # **A reproduction travels with the differential cell, and only that cell.** It is the comparison
+  # written out for somebody else to run; the install and load cells are derived facts about the same
+  # pair and carry none. A pair with no reproduction emits no key, which is not the same as one that
+  # failed.
+  def test_a_reproduction_rides_the_differential_cell_and_only_that_one
+    store = Ledger.new(machine: "ruby 3.3.12 cc")
+    store.record_pair("actionpack", "5.0.7.2", "5.1.0", outcome: Ledger::DONE, findings: 1, now: 100.0)
+
+    refute(store.examinations(ecosystem: "ruby").any? { |row| row.key?("reproduction") })
+
+    store.record_pair("actionpack", "5.0.7.2", "5.1.0", outcome: Ledger::DONE, findings: 1, now: 200.0,
+      reproduction: { "format" => 1, "command" => nil,
+                      "expected" => { "exception" => "NoMethodError" } })
+
+    rows = store.examinations(ecosystem: "ruby")
+    differential = rows.find { |row| row.fetch("check_kind") == "differential" }
+    assert_equal 1, differential.fetch("reproduction").fetch("format")
+    assert_equal "NoMethodError", differential.fetch("reproduction").dig("expected", "exception")
+    refute(rows.find { |row| row.fetch("check_kind") == "install" }.key?("reproduction"))
+    refute(rows.find { |row| row.fetch("check_kind") == "load" }.key?("reproduction"))
+  end
+
+  # A re-record without a reproduction keeps the last one: a differential re-run does not un-write
+  # the comparison somebody already recorded, the same rule the resolver and boot cells keep.
+  def test_a_re_record_without_a_reproduction_keeps_the_last
+    store = Ledger.new(machine: "ruby 3.3.12 cc")
+    store.record_pair("rails", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 100.0,
+      reproduction: { "format" => 1 })
+    store.record_pair("rails", "7.1.0", "7.1.6", outcome: Ledger::EMPTY, now: 200.0)
+
+    assert_equal 1, store.pair("rails", "7.1.0", "7.1.6").reproduction.fetch("format")
+  end
+
+  # The ledger round-trips the field, and a ledger written before it existed reads back with none.
+  def test_a_reproduction_survives_a_write_and_read
+    dir = Dir.mktmpdir
+    path = File.join(dir, "ledger.json")
+    store = Ledger.new(machine: "ruby 3.3.12 cc")
+    store.record_pair("rails", "7.1.0", "7.1.6", outcome: Ledger::DONE, findings: 1, now: 100.0,
+      reproduction: { "format" => 1, "library" => "rails", "command" => nil })
+    Ledger.save(store, path)
+
+    reopened = Ledger.load(path)
+    assert_equal 1, reopened.pair("rails", "7.1.0", "7.1.6").reproduction.fetch("format")
+  ensure
+    FileUtils.remove_entry(dir) if dir && File.directory?(dir)
+  end
+
   # `since:` bounds a push to a cycle's own work, so a running service sends what it just did
   # rather than the whole ledger every ten minutes.
   def test_a_since_bound_sends_only_the_pairs_touched_after_it

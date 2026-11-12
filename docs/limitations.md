@@ -79,6 +79,12 @@ recomputed from the change feed every cycle; the breadth order is not. A running
 up a new breadth order only on restart. Re-reading on a slow cadence is the fix if the breadth
 order has to move under a running process.
 
+A caller's examination request is the exception, and deliberately: `GET /api/mining/requests` is
+read every cycle, because a request names the two releases and is work for *this* cycle rather
+than a preference about the order. A request the ledger has already settled is not work — the
+ledger's `due?` is the one rule — and the service marks a request satisfied when the examination
+for the same window is recorded, so a satisfied request drops out of the next read.
+
 An empty queue and a paused queue are different answers. The client raises on the paused one
 rather than treating it as empty. A queue that is merely stale is not distinguishable from one
 that is finished from inside the loop; the cycle names its reasons and the ledger names its

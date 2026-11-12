@@ -17,6 +17,7 @@ require_relative "ledger"
 require_relative "log"
 require_relative "pair"
 require_relative "planner"
+require_relative "reproduction"
 require_relative "resolver"
 require_relative "rubyversions"
 require_relative "rubyindex"
@@ -196,15 +197,15 @@ module AgentsMiner
     #
     # A differential proves the two endpoints and says nothing about the releases between them, so a
     # finding arriving in a twelve-release window names a range rather than a release. Bisection
-    # turns that into a boundary in `ceil(log2(k))` installs — four for twelve — and this is the
-    # ceiling rather than the number, because the window's size is a fact about the package. Four
-    # covers a window of up to sixteen releases; a larger one gets a boundary this cycle and the
-    # rest next time, or none at all, which is a report that says less rather than one that guesses.
+    # turns that into a boundary in `ceil(log2(k))` installs — four for twelve, eight for a window
+    # of up to 256 — and this is the ceiling rather than the number, because the window's size is a
+    # fact about the package. Eight is the ceiling for a crossing somebody asked about; a ladder
+    # crossing nobody has asked about spends none, and one an advisory lead or an open report put
+    # here spends two (`bisect_budget`).
     #
-    # A ceiling rather than a default of zero because a field nobody fills is a field nobody reads:
-    # the corpus is meant to answer "did this release break me", and four extra installs on the
-    # pairs that already produced a finding is the price of that answer.
-    BISECT_PROBES = 4
+    # Raising it from four is what demand-ranking buys: the extra installs go where somebody is
+    # waiting, and the pairs nobody is waiting on stop paying for an answer nobody reads.
+    BISECT_PROBES = 8
 
     # A ceiling on what this container downloads, in MB per second. 0 means none.
     #
@@ -378,6 +379,12 @@ module AgentsMiner
       # the picture itself is cached on the volume, so a fresh process re-reads it from there.
       @advisory_leads = {}
       @advisories_at = nil
+      # **The windows callers asked this service to examine, per index and window.** Read once per
+      # cycle in `one_cycle`, because a request is work for *this* cycle: unlike a lead it names
+      # the two releases, so the pair goes straight into the plan. In memory rather than in the
+      # ledger — the service owns the request's state, and the join that satisfies it happens on
+      # the examination write.
+      @examination_requests = {}
       # Whether the corpus's existing backlog still has to be read. In memory rather than in the
       # ledger: it is a fact about this process, and one stored anywhere else would be a flag that
       # could get stuck on.
@@ -529,6 +536,11 @@ module AgentsMiner
       # On a slow clock, and before the plan: a reviewed advisory is one of the three inputs the
       # order is built from, so reading it after the plan would be a cycle behind.
       refresh_advisories(stats)
+      # **A caller's ask, read every cycle.** Unlike an advisory this is not cached: a request is
+      # work for *this* cycle, and a stale picture would keep mining a window somebody has already
+      # had answered. Best-effort — a service that cannot be reached costs the cycle its requests
+      # and not its work.
+      refresh_examination_requests(stats)
       # One plan per index, because a plan is an order over one index's watchlist: merging
       # them would have to compare a package's score with a gem's, and the two queues were
       # built by the service's own ranking per index. The reports are answered once — they
@@ -559,6 +571,7 @@ module AgentsMiner
           # The leads are read here rather than fetched inside the planner: the planner is pure and
           # must stay testable without a network or a cache, so the caller hands it what it read.
           leads: leads_for(ecosystem),
+          requests: requests_for(ecosystem),
           advisory_of: ecosystem.method(:advisory_pair),
           now: Time.now.to_f,
           budget: allowance,
@@ -765,6 +778,48 @@ module AgentsMiner
 
     # The reviewed advisories this index's leads came from, grouped by gem.
     def leads_for(ecosystem) = @advisory_leads[index(ecosystem).name] || {}
+
+    # The requests for one index, as the planner reads them: `{package => [{from_version,
+    # to_version}]}`.
+    #
+    # The shape is the planner's rather than the route's, so a request's other fields (its state,
+    # its reason, who asked) do not travel into a pure ordering function. The pairs are grouped
+    # under the package they name because that is the key the ordering is over.
+    def requests_for(ecosystem) = @examination_requests[index(ecosystem).name] || {}
+
+    # **Read the windows callers asked for, and hand them to the plan.**
+    #
+    # A request is *work*: it names the two releases, so the pair goes straight into the plan
+    # rather than through the ladder. That is what makes the on-demand path answer the question
+    # somebody actually asked, including a crossing the line ladder would never produce.
+    #
+    # Best-effort, like every other read here: a service that cannot be reached costs the cycle its
+    # requests, not its work. A paused index raises out of the client — the same signal the queue
+    # read gives — and is caught here as "no requests this cycle", because a pause is a reason not
+    # to file, and the request itself is still there when the pause lifts.
+    def refresh_examination_requests(stats)
+      @ecosystems.each do |ecosystem|
+        name = index(ecosystem).name
+        rows = @session.examination_requests(ecosystem: name)
+        grouped = Hash.new { |hash, key| hash[key] = [] }
+        rows.each do |row|
+          library = row["library"].to_s
+          next if library.empty?
+
+          grouped[library] << { "from_version" => row["from_version"].to_s,
+                                "to_version" => row["to_version"].to_s }
+        end
+        @examination_requests[name] = grouped
+        count = grouped.values.sum(&:length)
+        stats.notes << "[#{name}] #{count} examination request(s) live" if count.positive?
+      rescue Errors::CollectionPaused => e
+        @examination_requests[name] = {}
+        @log.info("not reading examination requests for %s: %s", name, e.message)
+      rescue Errors::CorpusError => e
+        @examination_requests[name] = {}
+        @log.warning("could not read examination requests for %s: %s", name, e.message)
+      end
+    end
 
     # Read the reviewed advisories and hand the service the picture, on a slow clock.
     #
@@ -1193,13 +1248,13 @@ module AgentsMiner
               break
             end
             begin
-              findings, error, resolve, boot = examine(pair)
-              results << [pair, findings, error, nil, resolve, boot]
+              findings, error, resolve, boot, before, after = examine(pair)
+              results << [pair, findings, error, nil, resolve, boot, before, after]
             rescue StandardError => e
               # A defect in the examining is a defect; it should cost the pair it was examining
               # rather than every pair in the batch and the cycle that ran them. Catching it here
               # rather than in `examine` keeps `examine` honest about the failures it knows about.
-              results << [pair, nil, nil, e, nil, nil]
+              results << [pair, nil, nil, e, nil, nil, nil, nil]
             end
           end
         end
@@ -1207,7 +1262,7 @@ module AgentsMiner
       # Consumed in completion order, so a slow package does not hold up the recording of the ones
       # behind it. Every result is recorded here, on the cycle's thread.
       admitted.length.times do
-        pair, findings, error, raised, resolve, boot = results.pop
+        pair, findings, error, raised, resolve, boot, before, after = results.pop
         # **The heartbeat is touched as work completes, not only when the cycle closes.** A cycle
         # is `@budget` pairs of installs and interpreter starts, and on the deployment one ran for
         # 1h43m — past the 90-minute heartbeat window the container's healthcheck reads, so a
@@ -1228,7 +1283,7 @@ module AgentsMiner
           stats.skipped += 1
           next
         end
-        record(pair, findings, error, stats, resolve, boot)
+        record(pair, findings, error, stats, resolve, boot, after)
       end
       threads.each(&:join)
     end
@@ -1262,12 +1317,12 @@ module AgentsMiner
         findings = one.findings(pair.package, pair.from_version, pair.to_version, before, after,
           suffix: "-#{pair.from_version}-#{pair.to_version}".tr("/", "_"))
       rescue Errors::MinerError => e
-        return [[], e, resolve, boot]
+        return [[], e, resolve, boot, nil, nil]
       end
       elapsed = ((monotonic - started) * 1000).round
       findings.each { |finding| finding.duration_ms = elapsed }
       establish_introductions(pair, before, findings)
-      [findings, nil, resolve, boot]
+      [findings, nil, resolve, boot, before, after]
     end
 
     # **One boot cell, or nothing.** Ruby only, bounded per cycle, and skipped when the pair already
@@ -1330,7 +1385,8 @@ module AgentsMiner
     # Nothing here raises. A bisection is an improvement to a finding the differential already
     # established, and a pair whose search failed is a pair that filed what it knew.
     def establish_introductions(pair, from_env, findings)
-      return if @dry_run || @bisect_probes.zero? || findings.empty?
+      budget = bisect_budget(pair)
+      return if @dry_run || budget.zero? || findings.empty?
 
       one = index(pair.ecosystem)
       releases = one.releases(one.history(pair.package, home: @home, refresh: false))
@@ -1340,7 +1396,7 @@ module AgentsMiner
       comparisons = {}
       probe = lambda do |version|
         next comparisons[version] if comparisons.key?(version)
-        next nil if spent >= @bisect_probes
+        next nil if spent >= budget
 
         spent += 1
         comparisons[version] = compare_against(pair, from_env, version)
@@ -1363,6 +1419,24 @@ module AgentsMiner
         pair.to_version, e.class, e.message)
     end
 
+    # **How many installs this crossing has earned.**
+    #
+    # The differential already proved the move, so an exact boundary is an improvement to a
+    # question somebody may not be reading. A ladder crossing nobody asked about therefore spends
+    # nothing; a reviewed advisory's lead or an open report is worth two probes; a caller's
+    # examination request is the whole budget, because somebody is waiting on that window. The
+    # comparisons are memoised across the crossing's findings, so this bounds the crossing rather
+    # than each finding.
+    def bisect_budget(pair)
+      return 0 if @bisect_probes.zero?
+
+      case pair.demand.to_i
+      when 0 then 0
+      when 1 then [@bisect_probes, 2].min
+      else @bisect_probes
+      end
+    end
+
     # What one middle release does to the from-release's calls, or nil when it cannot be asked.
     #
     # Nil rather than an empty list: an install that failed and a release that changed nothing are
@@ -1383,7 +1457,7 @@ module AgentsMiner
     # whether asking again could change the answer and which release it was about, and otherwise the
     # exception a caller's own defect raised — for which the safe reading is "try again", because
     # nothing has been established about the release.
-    def record(pair, findings, error, stats, resolve = nil, boot = nil)
+    def record(pair, findings, error, stats, resolve = nil, boot = nil, after = nil)
       one = ledger_for(pair.ecosystem)
       if error
         stats.skipped += 1
@@ -1454,11 +1528,37 @@ module AgentsMiner
         note: held_back ? "#{held_back} finding(s) not filed" : "",
         resolve: resolve && resolve[:outcome],
         resolve_note: resolve && resolve[:note],
-        boot: boot && boot[:outcome], boot_note: boot && boot[:note]
+        boot: boot && boot[:outcome], boot_note: boot && boot[:note],
+        reproduction: reproduction_for(pair, findings, after)
       )
       stats.pairs_mined += 1
       stats.findings += findings.length
       stats.filed += filed
+    end
+
+    # **The comparison, written out for the cell that carries it.** One reproduction per pair, from
+    # the first finding that names a reference and an exception — the pair's differential is one
+    # execution, and a cell with several findings still has one thing a reader would run. Nil when
+    # no finding qualifies, which leaves the cell's key set exactly as it was.
+    #
+    # **It is verified before it is recorded.** A record that names a command is a claim that
+    # somebody can run it; the only way to know is to run it once here, in the release's own
+    # environment, and compare the exception. A record that does not reproduce is downgraded to the
+    # description form by `Reproduction.verify` rather than filed as runnable.
+    def reproduction_for(pair, findings, after = nil)
+      finding = findings.find do |candidate|
+        !Reproduction.for(candidate, from_version: pair.from_version).nil?
+      end
+      return nil if finding.nil?
+
+      record = Reproduction.for(finding, from_version: pair.from_version)
+      return record if after.nil?
+
+      Reproduction.verify(record, env: after, ecosystem: pair.ecosystem)
+    rescue StandardError => e
+      @log.warning("could not verify the reproduction for %s %s->%s: %s: %s",
+        pair.package, pair.from_version, pair.to_version, e.class, e.message)
+      record
     end
 
     # One upgrade, examined and filed, with the ledger written either way.

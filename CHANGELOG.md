@@ -5,8 +5,32 @@ its image and its command line.
 
 ## [Unreleased]
 
+### Changed
+
+- **Bisection follows demand, and its budget is per crossing.** A pair a caller asked for gets
+  `BISECT_PROBES` (now `8`) installs; one that an advisory lead or an open report put in the plan
+  gets two; a ladder crossing nobody has asked about gets none and keeps the window the
+  differential proved. The planner stamps the demand on the pair, so the budget is decided where
+  the work is chosen rather than inside the search.
+
 ### Added
 
+- **A runnable reproduction of the comparison.** A finding now carries the reference its probe
+  executed (`Finding#expression`), and `AgentsMiner::Reproduction` writes that comparison out — the
+  release, the script, the command and the exception the newer release raised. Before it is recorded
+  the miner **re-runs it in the release's own environment** and compares the exception, so a record
+  that names a command is one the miner actually ran (`verified: true`, with what it `observed`); a
+  record that did not reproduce is downgraded to the description form rather than filed as runnable.
+  A behaviour comparison reads a value and calls nothing, so it has no expression and is a
+  description from the start. The record rides the pair's `differential` cell and round-trips through
+  the ledger (`PairRecord#reproduction`).
+- **A caller's examination request is read as work.** `GET /api/mining/requests` is read every cycle
+  (`Corpus#examination_requests`, `Service#refresh_examination_requests`), and the planner adds the
+  exact `(from, to)` window the request names — ahead of the ladder's own crossings, because the
+  request names the move — and weights the package above a reviewed advisory's lead and below an
+  open report (`REQUEST_BONUS = 0.75`). A request the ledger has already settled is not work. The
+  client never reports the satisfaction: the service marks a matching request satisfied when the
+  examination for the same window is recorded.
 - A verifier executes the claims somebody proposed. `GET /api/scenarios?state=unrun` is a queue of
   scenarios nobody has reached, and the verifier runs each one's own steps against both releases and
   records the run, which the service turns into the ordinary `reproduced` verification. A claim this

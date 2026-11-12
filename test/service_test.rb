@@ -214,6 +214,18 @@ class ServiceTest < MinerTest
 
       { "recorded" => records.length }
     end
+
+    # **The windows callers asked this service to examine.** Recorded so a test can see the pairs
+    # that travelled into the plan, and empty by default — a session that answered nothing asked
+    # for nothing, which is the state every test before this one was written in.
+    def examination_requests(ecosystem: "ruby", state: "open", limit: 200, pages: 8)
+      @calls << ["requests", ecosystem, state]
+      raise Errors::CorpusError, "refused" if @raise_on.include?("requests")
+
+      @examination_requests || []
+    end
+
+    attr_writer :examination_requests
   end
 
   # A fake that pages like the real feed: rows after the cursor, oldest first.
@@ -394,7 +406,8 @@ class ServiceTest < MinerTest
       [check.test_finding]
     end)
 
-    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.54", to_version: "2.0.54")
+    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.54", to_version: "2.0.54",
+      demand: 1)
     findings, error = make(FakeSession.new(one_page)).examine(pair)
 
     assert_nil error
@@ -415,7 +428,8 @@ class ServiceTest < MinerTest
       [check.test_finding]
     end)
 
-    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.0", to_version: "1.4.54")
+    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.0", to_version: "1.4.54",
+      demand: 1)
     findings, = make(FakeSession.new(one_page)).examine(pair)
 
     # One call, which is the differential itself: the search added no install.
@@ -435,7 +449,8 @@ class ServiceTest < MinerTest
       [check.test_finding]
     end)
 
-    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.54", to_version: "2.0.54")
+    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.54", to_version: "2.0.54",
+      demand: 1)
     findings, = make(FakeSession.new(one_page), bisect_probes: 0).examine(pair)
 
     assert_equal ["2.0.54"], probes
@@ -453,10 +468,43 @@ class ServiceTest < MinerTest
       [check.test_finding]
     end)
 
-    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.54", to_version: "2.0.54")
+    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.54", to_version: "2.0.54",
+      demand: 1)
     findings, = make(FakeSession.new(one_page)).examine(pair)
 
     assert_nil findings.first.introduced_in
+  end
+
+  def test_a_pair_nobody_demanded_keeps_the_window_and_spends_no_probe
+    # The differential proved the move; the boundary is an improvement to a question nobody has
+    # asked. A ladder crossing with no report, request or lead behind it installs nothing extra.
+    check = self
+    probes = []
+    replace(AgentsMiner::Mine, :findings_between, lambda do |_library, _from, to, *_envs, **_kwargs|
+      probes << to
+      [check.test_finding]
+    end)
+
+    pair = Pair.of(package: "sqlalchemy", from_version: "1.4.54", to_version: "2.0.54",
+      demand: 0)
+    findings, = make(FakeSession.new(one_page)).examine(pair)
+
+    assert_equal ["2.0.54"], probes
+    assert_nil findings.first.introduced_in
+  end
+
+  def test_the_bisection_budget_follows_the_demand_the_planner_stamped
+    miner = make(FakeSession.new(one_page))
+    pair = lambda do |demand|
+      Pair.of(package: "sqlalchemy", from_version: "1.4.54", to_version: "2.0.54",
+        demand: demand)
+    end
+
+    assert_equal 0, miner.bisect_budget(pair.call(0))
+    assert_equal 2, miner.bisect_budget(pair.call(1))
+    assert_equal AgentsMiner::Service::BISECT_PROBES, miner.bisect_budget(pair.call(2))
+    assert_operator AgentsMiner::Service::BISECT_PROBES, :>, 4,
+      "the ceiling covers a window larger than the old four"
   end
 
   # --- filing ---------------------------------------------------------------------------

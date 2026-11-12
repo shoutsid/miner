@@ -113,8 +113,8 @@ class PlannerTest < MinerTest
   # Written out rather than shared with the planner: a helper that called the same method would
   # agree with it by construction and catch nothing. The literal orders beside the comparisons
   # are the second guard — a bug in both would still have to produce those.
-  def scan_order(store, demand, watchlist, leads: {})
-    candidates = (demand.keys + leads.keys + watchlist).uniq
+  def scan_order(store, demand, watchlist, leads: {}, requests: {})
+    candidates = (demand.keys + leads.keys + requests.keys + watchlist).uniq
     positions = {}
     watchlist.each_with_index { |package, index| positions[package] ||= index }
 
@@ -126,7 +126,9 @@ class PlannerTest < MinerTest
         L::SETTLED_PAIR.include?(record.outcome) ? record.findings : 0
       end
       last = owned.filter_map { |_key, record| record.at }.max || 0.0
-      weight = 1 + demand.fetch(package, 0) + (leads.key?(package) ? P::LEAD_BONUS : 0)
+      weight = 1 + demand.fetch(package, 0) +
+               (leads.key?(package) ? P::LEAD_BONUS : 0) +
+               (requests.key?(package) ? P::REQUEST_BONUS : 0)
       [package, weight * (yielded + 1).fdiv(settled + P::YIELD_PRIOR), last]
     end
 
@@ -184,6 +186,23 @@ class PlannerTest < MinerTest
     # Both are unseen, so the weight is the whole of the difference.
     assert_equal %w[sqlalchemy httpx],
       P.package_order(demand: counts, watchlist: %w[httpx sqlalchemy], ledger: L.new)
+  end
+
+  # **Demand travels on the pair, because the worker is where it is spent.** The planner is the
+  # only place that knows somebody filed a report about this library; the bisection reads the
+  # count and decides whether an exact boundary is worth an install. A package with no report,
+  # request or lead keeps the window the differential proved.
+  def test_a_report_stamps_its_package_demand_on_the_pairs_it_puts_in_the_plan
+    chosen = P.plan(
+      reports: [report], watchlist: %w[sqlalchemy httpx], ledger: L.new,
+      history_for: method(:history_for), now: 1_000.0, budget: 2
+    )
+
+    demands = chosen.pairs.to_h { |pair| [pair.package, pair.demand] }
+
+    assert_equal 1, demands.fetch("sqlalchemy")
+    assert_equal 0, demands.fetch("httpx"),
+      "a package nobody asked about spends no bisection and keeps its window"
   end
 
   def test_the_package_touched_longest_ago_goes_first
@@ -562,6 +581,51 @@ class PlannerTest < MinerTest
     assert_equal({ "the index could not be read" => 1 }, chosen.kinds)
   end
 
+  # **A caller's own request is work, and it names the pair.** Unlike a lead it does not need the
+  # ladder to produce the crossing: the request names the two releases, so the pair goes straight
+  # into the plan even when the history has no such line crossing.
+  def test_a_request_adds_its_package_and_its_exact_window
+    chosen = P.plan(
+      reports: [], watchlist: [], ledger: L.new, now: 0.0,
+      history_for: ->(_package, refresh: true) { %w[1.0.0 1.1.0 1.2.0] },
+      requests: { "actionpack" => [{ "from_version" => "5.0.7.2", "to_version" => "5.1.0" }] }
+    )
+
+    assert_equal [["5.0.7.2", "5.1.0"]],
+      chosen.pairs.map { |pair| [pair.from_version, pair.to_version] }
+    assert_equal 2, chosen.pairs.first.demand,
+      "a caller's request is first-party demand, so the crossing gets the whole bisection budget"
+  end
+
+  # A request is first-party demand, so it outranks a reviewed advisory's lead — but a report
+  # somebody filed is still the stronger signal.
+  def test_a_request_outranks_a_lead_and_sits_below_a_report
+    store = L.new
+    ordered = P.package_order(
+      demand: { "reported" => 1 }, watchlist: %w[plain],
+      ledger: store,
+      leads: { "advised" => [lead("GHSA-aaaa-bbbb-cccc", "high", "1.0.0")] },
+      requests: { "asked" => [{ "from_version" => "1.0.0", "to_version" => "2.0.0" }] }
+    )
+
+    assert_equal %w[reported asked advised plain], ordered
+  end
+
+  # A request for a crossing the ledger has already settled is not work: the ledger's `due?` is the
+  # one rule, and a caller's ask does not override it.
+  def test_a_request_for_a_settled_pair_is_not_work
+    store = L.new
+    store.record_pair("actionpack", "5.0.7.2", "5.1.0", outcome: L::DONE, findings: 1, now: 100.0)
+
+    chosen = P.plan(
+      reports: [], watchlist: [], ledger: store, now: 200.0,
+      history_for: ->(_package, refresh: true) { %w[5.0.7.2 5.1.0] },
+      requests: { "actionpack" => [{ "from_version" => "5.0.7.2", "to_version" => "5.1.0" }] }
+    )
+
+    assert_empty chosen.pairs
+  end
+
   # A reviewed advisory is a lead, and the planner's two jobs with one are both here: it adds the
   # package to the candidates even when nothing else named it, and it targets the crossing the fix
   # landed in — a patch crossing the line ladder never produces.
@@ -576,6 +640,8 @@ class PlannerTest < MinerTest
 
     assert_equal [["2.2.6", "2.2.6.1"]],
       chosen.pairs.map { |pair| [pair.from_version, pair.to_version] }
+    assert_equal 1, chosen.pairs.first.demand,
+      "a reviewed advisory is demand, but a weaker one than an open report"
   end
 
   # A lead reaches past the window bound — that is the point of it — but only to its own pair, never

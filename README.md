@@ -22,7 +22,8 @@ reviewers can read the client, not because it is open source.
 - **`solve`** — read open reports and attach an executed fix where the client can establish
   one.
 - **`serve`** — the durable loop: read the service's mining queue, extend it with a breadth
-  ranking, keep a ledger, and examine several upgrades at once. Each examined pair pushes a
+  ranking, read the windows callers have asked the corpus to examine, keep a ledger, and examine
+  several upgrades at once. Each examined pair pushes a
   `differential` cell plus `install` and `load` cells, and a bounded number of pairs also get a
   `resolve` cell (a minimal Gemfile and `bundle lock`) and a `boot` cell (the release installed and
   required inside a minimal Rack host). Every gem `check_kind` the service declares is produced

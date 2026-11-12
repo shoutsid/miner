@@ -137,10 +137,10 @@ module AgentsMiner
     #
     class PairRecord
       FIELDS = %w[attempts findings filed outcome at next_at note release machine resolve
-        resolve_note boot boot_note].freeze
+        resolve_note boot boot_note reproduction].freeze
 
       attr_accessor :attempts, :findings, :filed, :outcome, :at, :next_at, :note, :release,
-        :machine, :resolve, :resolve_note, :boot, :boot_note
+        :machine, :resolve, :resolve_note, :boot, :boot_note, :reproduction
 
       # `release` and `machine` are additive with defaults, so no schema bump: bumping would
       # have set every existing ledger aside and redone months of settled work.
@@ -167,9 +167,13 @@ module AgentsMiner
       # `boot` and `boot_note` are the same shape for the boot cell: whether the release came up in
       # a host, and the host's own output. Separate from `load` because a release can require
       # cleanly and still refuse to boot.
+      #
+      # `reproduction` is the comparison written out for somebody else to run, when the pair's
+      # findings named one — a description rather than a runnable script, and the cell's read says
+      # which. Empty means the pair recorded none, which is not the same as one that failed.
       def initialize(attempts: 0, findings: 0, filed: 0, outcome: FAILED, at: 0.0, next_at: 0.0,
                      note: "", release: "", machine: "", resolve: "", resolve_note: "",
-                     boot: "", boot_note: "")
+                     boot: "", boot_note: "", reproduction: nil)
         @attempts = attempts
         @findings = findings
         @filed = filed
@@ -183,13 +187,15 @@ module AgentsMiner
         @resolve_note = resolve_note
         @boot = boot
         @boot_note = boot_note
+        @reproduction = reproduction
       end
 
       def to_h
         { "attempts" => @attempts, "findings" => @findings, "filed" => @filed,
           "outcome" => @outcome, "at" => @at, "next_at" => @next_at, "note" => @note,
           "release" => @release, "machine" => @machine, "resolve" => @resolve,
-          "resolve_note" => @resolve_note, "boot" => @boot, "boot_note" => @boot_note }
+          "resolve_note" => @resolve_note, "boot" => @boot, "boot_note" => @boot_note,
+          "reproduction" => @reproduction }
       end
 
       # One record, reading the field that was renamed on the way in, and refusing a field this
@@ -221,7 +227,8 @@ module AgentsMiner
           resolve: record.fetch("resolve", ""),
           resolve_note: record.fetch("resolve_note", ""),
           boot: record.fetch("boot", ""),
-          boot_note: record.fetch("boot_note", "")
+          boot_note: record.fetch("boot_note", ""),
+          reproduction: record["reproduction"].is_a?(Hash) ? record["reproduction"] : nil
         )
       end
     end
@@ -412,7 +419,7 @@ module AgentsMiner
     # Write down what this attempt did, and when the next one is allowed.
     def record_pair(package, from_version, to_version, outcome:, findings: 0, filed: 0,
                     next_at: nil, note: "", release: "", now: nil, machine: nil, resolve: nil,
-                    resolve_note: nil, boot: nil, boot_note: nil)
+                    resolve_note: nil, boot: nil, boot_note: nil, reproduction: nil)
       moment = now.nil? ? Time.now.to_f : now
       previous = pair(package, from_version, to_version) || PairRecord.new
       record = PairRecord.new(
@@ -431,7 +438,11 @@ module AgentsMiner
         resolve: resolve.nil? ? previous.resolve : resolve,
         resolve_note: resolve_note.nil? ? previous.resolve_note : resolve_note,
         boot: boot.nil? ? previous.boot : boot,
-        boot_note: boot_note.nil? ? previous.boot_note : boot_note
+        boot_note: boot_note.nil? ? previous.boot_note : boot_note,
+        # **A reproduction is its own fact, and a re-record without one keeps the last.** The same
+        # rule the resolution and boot cells keep: a differential re-run does not un-write the
+        # comparison somebody already recorded.
+        reproduction: reproduction.nil? ? previous.reproduction : reproduction
       )
       @pairs[Ledger.key(package, from_version, to_version)] = record
       # The derived indexes are reads of these records, and one just changed.
@@ -633,7 +644,7 @@ module AgentsMiner
           "finding_count" => record.findings.to_i,
           "report_ids" => [],
           "evidence" => { "release" => record.release.to_s }.reject { |_k, v| v.empty? }
-        ),
+        ).merge(reproduction_cell(record)),
         base.merge(
           "check_kind" => "install",
           "outcome" => INSTALL_OUTCOMES.fetch(record.outcome),
@@ -660,6 +671,16 @@ module AgentsMiner
         # to boot; the host's own output is the evidence.
         *boot_cell(base, record)
       ]
+    end
+
+    # The `reproduction` key for the differential cell, or nothing when the pair recorded none. It is
+    # merged rather than always present so a cell with no reproduction keeps exactly the key set it
+    # had before the column existed.
+    def reproduction_cell(record)
+      value = record.reproduction
+      return {} unless value.is_a?(Hash) && !value.empty?
+
+      { "reproduction" => value }
     end
 
     # The `resolve` cell, or nothing when no resolver run was recorded. Its evidence is the

@@ -95,14 +95,15 @@ module AgentsMiner
   class Observation
     FIELDS = %i[
       symbol parameter exception accepted_before accepted_after
-      repair candidate moved traceback accepted_output kind relation observed_after
+      repair candidate moved traceback accepted_output kind relation observed_after expression
     ].freeze
 
     attr_reader(*FIELDS)
 
     def initialize(symbol:, parameter:, exception:, accepted_before:, accepted_after:,
                    repair: nil, candidate: nil, moved: nil, traceback: "",
-                   accepted_output: "", kind: "argument", relation: nil, observed_after: "")
+                   accepted_output: "", kind: "argument", relation: nil, observed_after: "",
+                   expression: "")
       @symbol = symbol
       @parameter = parameter
       @exception = exception
@@ -131,6 +132,11 @@ module AgentsMiner
       # claims by executing a reference rather than by reading a value.
       @relation = relation
       @observed_after = observed_after
+      # **The reference the probe executed, as the interpreter's own text.** This is the one field
+      # that makes a finding reproducible: a reproduction can write the same `eval` into a script
+      # and run it, rather than describing a call it cannot express. Empty for a pass that has no
+      # such expression (a behaviour comparison reads a value; it calls nothing).
+      @expression = expression
       freeze
     end
 
@@ -160,14 +166,15 @@ module AgentsMiner
       :ecosystem, :runtime, :parameter, :symbol, :replacement,
       :refused_candidate, :moved, :signatures, :call_sites,
       :repaired_call_sites, :trace, :notes, :exception, :accepted_output, :callable, :duration_ms,
-      :introduced_in, :relation, :observed_after
+      :introduced_in, :relation, :observed_after, :expression
 
     def initialize(library: nil, module_name: "", version: nil, mechanism: nil, title: nil,
                    problem: nil, resolution: nil, ecosystem: "python", runtime: "", parameter: "",
                    symbol: "", replacement: nil, refused_candidate: nil, moved: nil,
                    signatures: [], call_sites: 1, repaired_call_sites: 0, trace: "",
                    notes: [], exception: "", accepted_output: "", callable: "",
-                   duration_ms: 0, introduced_in: nil, relation: nil, observed_after: "")
+                   duration_ms: 0, introduced_in: nil, relation: nil, observed_after: "",
+                   expression: "")
       # What pydantic did with a missing field, kept as a refusal rather than a nil: a finding
       # without a title is a request the corpus would answer 422 to, and the miner would learn that
       # after the work of deriving it.
@@ -243,6 +250,10 @@ module AgentsMiner
       # the second half would be a claim with nothing to check it against.
       @relation = relation
       @observed_after = observed_after
+      # **The reference the probe executed.** The one field that makes a finding reproducible: a
+      # reproduction writes the same `eval` into a script rather than describing a call it cannot
+      # express. Empty for a behaviour comparison, which calls nothing.
+      @expression = expression
     end
 
     # What this release took away, whichever pass established it.
@@ -268,7 +279,7 @@ module AgentsMiner
         "exception" => exception, "accepted_output" => accepted_output,
         "callable" => callable, "duration_ms" => duration_ms,
         "introduced_in" => introduced_in, "relation" => relation,
-        "observed_after" => observed_after
+        "observed_after" => observed_after, "expression" => expression
       }
     end
   end
@@ -449,6 +460,9 @@ module AgentsMiner
         "" : observed.symbol.to_s,
       relation: observed.kind == Behaviour::KIND ? observed.relation : nil,
       observed_after: observed.kind == Behaviour::KIND ? observed.observed_after.to_s : "",
+      # **The reference the probe executed**, carried onto the finding so a reproduction can write
+      # the same `eval` rather than describe a call it cannot express.
+      expression: observed.expression.to_s,
       trace: observed.traceback.to_s.strip
     )
   end
