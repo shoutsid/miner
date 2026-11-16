@@ -24,7 +24,7 @@
 # than installed from apt, which is exactly how this file used to carry Ruby.
 #
 # Pinned by digest for the reason above.
-FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704 AS python
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS python
 
 # Ruby is the client and the *base*, and the pin is a decision about which
 # interpreter its rules were verified against rather than about size. Debian
@@ -35,7 +35,7 @@ FROM python:3.12-slim@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e
 # rules were written against one interpreter and shipped on another is a client
 # whose rules were never verified at all. The client itself is stdlib only — no
 # bundler here — so the runtime is the whole of the Ruby half.
-FROM ruby:3.3-slim@sha256:379ffc9ca20cae2655cb80cac53ee23e1e7d859c03a4cceb7f567d6ce4873cee
+FROM ruby:4.0-slim@sha256:d8cb2c0714bdaba0f318af897a01d2dbde3cfa8e62d47e99cea55feb13c0e90d
 
 # The two trees are disjoint — this base keeps Ruby's interpreter, gems and libruby under
 # `/usr/local`, and the Python one keeps `bin/python3.12`, `lib/python3.12`,
